@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+dev.db
+*.log
+.DS_Store
+android/
+app-comercios/node_modules/
+app-comercios/dist/
+backend/node_modules/
+backend/dev.db

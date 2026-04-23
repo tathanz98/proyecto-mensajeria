@@ -1,0 +1,59 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id             String    @id @default(uuid())
+  email          String    @unique
+  password       String
+  name           String
+  role           String    // 'COURIER' or 'BUSINESS'
+  bankAccount    String?
+  vehicle        String?   // 'Moto', 'Bicicleta', 'Carro'
+  
+  // Financiero
+  cardBalance    Float     @default(0)
+  debt           Float     @default(0)
+  isBlocked      Boolean   @default(false)
+  
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  ordersAsCourier Order[]  @relation("CourierOrders")
+  ordersAsBusiness Order[] @relation("BusinessOrders")
+  ledger          Ledger[]
+}
+
+model Order {
+  id             String    @id @default(uuid())
+  status         String    // 'PENDING', 'ACCEPTED', 'PICKED_UP', 'DELIVERED'
+  pickupPin      String
+  dropoffPin     String
+  price          Float
+  
+  businessId     String
+  business       User      @relation("BusinessOrders", fields: [businessId], references: [id])
+  
+  courierId      String?
+  courier        User?     @relation("CourierOrders", fields: [courierId], references: [id])
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+}
+
+model Ledger {
+  id             String    @id @default(uuid())
+  type           String    // 'PLATFORM_FEE', 'EARNING', 'TAX_DEDUCTION'
+  amount         Float
+  description    String
+  
+  userId         String
+  user           User      @relation(fields: [userId], references: [id])
+
+  createdAt      DateTime  @default(now())
+}
