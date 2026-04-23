@@ -16,6 +16,10 @@ model User {
   bankAccount    String?
   vehicle        String?   // 'Moto', 'Bicicleta', 'Carro'
   
+  // Seguridad y Recuperación
+  resetCode      String?
+  resetCodeExpires DateTime?
+  
   // Financiero
   cardBalance    Float     @default(0)
   debt           Float     @default(0)

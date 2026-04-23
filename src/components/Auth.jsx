@@ -11,10 +11,17 @@ export default function Auth({ onLogin }) {
   const [acceptTerms, setAcceptTerms] = useState(false);
   const [showTerms, setShowTerms] = useState(false);
   const [error, setError] = useState(null);
+  
+  // Forgot Password States
+  const [forgotPasswordMode, setForgotPasswordMode] = useState(false);
+  const [resetStep, setResetStep] = useState(1); // 1: Email, 2: Code, 3: New Password
+  const [resetCode, setResetCode] = useState('');
+  const [tempToken, setTempToken] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setError(null); // Clear previous errors
+    setError(null);
     if (!isLogin && !acceptTerms) {
       setError('Debes leer y aceptar el contrato de prestación de servicios para continuar.');
       return;
@@ -45,7 +52,6 @@ export default function Auth({ onLogin }) {
         alert('¡Sesión iniciada con éxito!');
         onLogin();
       } else {
-        // Proceed to document upload step
         setRegistrationStep(2);
       }
     } catch (err) {
@@ -53,9 +59,55 @@ export default function Auth({ onLogin }) {
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError(''); setSuccessMsg('');
+    try {
+      if (resetStep === 1) {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/forgot-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setSuccessMsg(`Se ha enviado un código a tu correo. (Demo - Código: ${data.simulatedCode})`);
+          setResetStep(2);
+        } else setError(data.error);
+      } else if (resetStep === 2) {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/verify-code`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, code: resetCode })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setTempToken(data.tempToken);
+          setSuccessMsg('Código verificado. Ingresa tu nueva contraseña.');
+          setResetStep(3);
+        } else setError(data.error);
+      } else if (resetStep === 3) {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/reset-password`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tempToken, newPassword: password })
+        });
+        const data = await res.json();
+        if (res.ok) {
+          alert('¡Contraseña cambiada con éxito! Inicia sesión.');
+          setForgotPasswordMode(false);
+          setResetStep(1);
+          setSuccessMsg('');
+        } else setError(data.error);
+      }
+    } catch (err) {
+      setError('Error de conexión');
+    }
+  };
+
   const handleDocumentUpload = (e) => {
     e.preventDefault();
-    setRegistrationStep(3); // Go to welcome screen
+    setRegistrationStep(3);
   };
 
   const handleFinishWelcome = () => {
@@ -118,6 +170,53 @@ export default function Auth({ onLogin }) {
           <button onClick={handleFinishWelcome} className="btn-primary" style={{ width: '100%' }}>
             Entrar a la App <ArrowRight size={20} />
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (forgotPasswordMode) {
+    return (
+      <div className="view-container animate-fade-in" style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <div className="glass-panel animate-slide-up" style={{ width: '100%', padding: '32px 24px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <ShieldCheck size={48} color="var(--primary)" />
+            <h2 style={{ marginTop: '16px' }}>Recuperar Contraseña</h2>
+          </div>
+          
+          {error && <div style={{ background: 'rgba(239, 68, 68, 0.1)', color: 'var(--danger)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}><AlertCircle size={18} /> {error}</div>}
+          {successMsg && <div style={{ background: 'rgba(16, 185, 129, 0.1)', color: 'var(--primary)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem' }}>{successMsg}</div>}
+
+          <form onSubmit={handleForgotPassword}>
+            {resetStep === 1 && (
+              <div className="input-group">
+                <label>Correo Electrónico</label>
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="tu@correo.com" required className="input-field" />
+              </div>
+            )}
+            
+            {resetStep === 2 && (
+              <div className="input-group">
+                <label>Código de 6 dígitos</label>
+                <input type="text" value={resetCode} onChange={(e) => setResetCode(e.target.value)} placeholder="Ej: 123456" maxLength={6} required className="input-field" style={{ letterSpacing: '4px', textAlign: 'center', fontSize: '1.2rem' }} />
+              </div>
+            )}
+
+            {resetStep === 3 && (
+              <div className="input-group">
+                <label>Nueva Contraseña</label>
+                <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="********" required className="input-field" />
+              </div>
+            )}
+
+            <button type="submit" className="btn-primary" style={{ width: '100%', marginTop: '24px' }}>
+              {resetStep === 1 ? 'Enviar Código' : resetStep === 2 ? 'Verificar Código' : 'Restablecer'}
+            </button>
+            
+            <button type="button" onClick={() => { setForgotPasswordMode(false); setResetStep(1); setError(''); setSuccessMsg(''); }} style={{ background: 'none', border: 'none', width: '100%', marginTop: '12px', color: 'var(--text-muted)', cursor: 'pointer' }}>
+              Volver al inicio de sesión
+            </button>
+          </form>
         </div>
       </div>
     );
@@ -228,11 +327,19 @@ export default function Auth({ onLogin }) {
             </div>
           )}
 
-          <button type="submit" className="btn-primary" style={{ marginBottom: '24px' }}>
+          <button type="submit" className="btn-primary" style={{ width: '100%', marginBottom: '24px' }}>
             {isLogin ? 'Iniciar Sesión' : 'Registrarse'}
             <ArrowRight size={20} />
           </button>
         </form>
+
+        {isLogin && (
+          <p style={{ textAlign: 'center', marginBottom: '24px', fontSize: '0.9rem' }}>
+            <button onClick={() => { setForgotPasswordMode(true); setError(''); }} style={{ background: 'none', border: 'none', color: 'var(--primary)', cursor: 'pointer', textDecoration: 'underline' }}>
+              ¿Olvidaste tu contraseña?
+            </button>
+          </p>
+        )}
 
         <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '24px' }}>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
