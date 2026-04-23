@@ -49,8 +49,13 @@ export default function Auth({ onLogin }) {
       localStorage.setItem('userId', data.userId || data.user?.id);
       
       if (isLogin) {
-        alert('¡Sesión iniciada con éxito!');
-        onLogin();
+        if (data.user.isVerified) {
+          alert('¡Sesión iniciada con éxito!');
+          onLogin();
+        } else {
+          // Si no está verificado, lo forzamos a la pantalla de subir fotos
+          setRegistrationStep(2);
+        }
       } else {
         setRegistrationStep(2);
       }
@@ -105,9 +110,35 @@ export default function Auth({ onLogin }) {
     }
   };
 
-  const handleDocumentUpload = (e) => {
+  // KYC States
+  const [selfieFile, setSelfieFile] = useState(null);
+  const [idFrontFile, setIdFrontFile] = useState(null);
+  const [idBackFile, setIdBackFile] = useState(null);
+  const [uploadingDocs, setUploadingDocs] = useState(false);
+
+  const handleDocumentUpload = async (e) => {
     e.preventDefault();
-    setRegistrationStep(3);
+    if (!selfieFile || !idFrontFile || !idBackFile) {
+      setError('Debes subir las 3 fotos requeridas.');
+      return;
+    }
+    setUploadingDocs(true);
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/upload-docs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: localStorage.getItem('userId') })
+      });
+      if (res.ok) {
+        setRegistrationStep(3); // Go to welcome screen
+      } else {
+        setError('Error al verificar documentos.');
+      }
+    } catch (error) {
+      setError('Error de conexión.');
+    } finally {
+      setUploadingDocs(false);
+    }
   };
 
   const handleFinishWelcome = () => {
@@ -126,27 +157,57 @@ export default function Auth({ onLogin }) {
           <form onSubmit={handleDocumentUpload}>
             <div className="input-group" style={{ textAlign: 'left', marginBottom: '16px' }}>
               <label>1. Tómate una Selfie</label>
-              <button type="button" className="input-field" style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)' }}>
-                <Camera size={20} /> Abrir Cámara Frontal
-              </button>
+              <div style={{ position: 'relative', overflow: 'hidden' }}>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="user" 
+                  onChange={(e) => setSelfieFile(e.target.files[0])}
+                  style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 2 }}
+                />
+                <div className="input-field" style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: selfieFile ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)', color: selfieFile ? 'var(--success)' : 'var(--text-main)', border: selfieFile ? '1px solid var(--success)' : '1px solid var(--border-color)' }}>
+                  {selfieFile ? <CheckCircle size={20} /> : <Camera size={20} />} 
+                  {selfieFile ? 'Selfie capturada' : 'Abrir Cámara Frontal'}
+                </div>
+              </div>
             </div>
 
             <div className="input-group" style={{ textAlign: 'left', marginBottom: '16px' }}>
               <label>2. Cédula (Lado Frontal)</label>
-              <button type="button" className="input-field" style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)' }}>
-                <FileText size={20} /> Tomar foto frontal
-              </button>
+              <div style={{ position: 'relative', overflow: 'hidden' }}>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="environment" 
+                  onChange={(e) => setIdFrontFile(e.target.files[0])}
+                  style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 2 }}
+                />
+                <div className="input-field" style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: idFrontFile ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)', color: idFrontFile ? 'var(--success)' : 'var(--text-main)', border: idFrontFile ? '1px solid var(--success)' : '1px solid var(--border-color)' }}>
+                  {idFrontFile ? <CheckCircle size={20} /> : <FileText size={20} />} 
+                  {idFrontFile ? 'Foto frontal lista' : 'Tomar foto frontal'}
+                </div>
+              </div>
             </div>
 
             <div className="input-group" style={{ textAlign: 'left', marginBottom: '32px' }}>
               <label>3. Cédula (Lado Trasero)</label>
-              <button type="button" className="input-field" style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: 'rgba(255,255,255,0.05)', color: 'var(--text-main)' }}>
-                <FileText size={20} /> Tomar foto trasera
-              </button>
+              <div style={{ position: 'relative', overflow: 'hidden' }}>
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="environment" 
+                  onChange={(e) => setIdBackFile(e.target.files[0])}
+                  style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', cursor: 'pointer', zIndex: 2 }}
+                />
+                <div className="input-field" style={{ display: 'flex', alignItems: 'center', gap: '8px', justifyContent: 'center', background: idBackFile ? 'rgba(16, 185, 129, 0.1)' : 'rgba(255,255,255,0.05)', color: idBackFile ? 'var(--success)' : 'var(--text-main)', border: idBackFile ? '1px solid var(--success)' : '1px solid var(--border-color)' }}>
+                  {idBackFile ? <CheckCircle size={20} /> : <FileText size={20} />} 
+                  {idBackFile ? 'Foto trasera lista' : 'Tomar foto trasera'}
+                </div>
+              </div>
             </div>
 
-            <button type="submit" className="btn-primary" style={{ width: '100%' }}>
-              Enviar Documentos <ArrowRight size={20} />
+            <button type="submit" className="btn-primary" style={{ width: '100%', opacity: (!selfieFile || !idFrontFile || !idBackFile || uploadingDocs) ? 0.5 : 1 }} disabled={!selfieFile || !idFrontFile || !idBackFile || uploadingDocs}>
+              {uploadingDocs ? 'Verificando...' : 'Enviar Documentos'} <ArrowRight size={20} />
             </button>
           </form>
         </div>

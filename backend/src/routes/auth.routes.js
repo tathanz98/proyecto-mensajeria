@@ -40,7 +40,7 @@ router.post('/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
-    res.json({ message: 'Login successful', token, user: { id: user.id, name: user.name, role: user.role } });
+    res.json({ message: 'Login successful', token, user: { id: user.id, name: user.name, role: user.role, isVerified: user.isVerified } });
   } catch (error) {
     res.status(500).json({ error: 'Error logging in' });
   }
@@ -126,6 +126,25 @@ router.post('/reset-password', async (req, res) => {
     res.json({ message: 'Contraseña restablecida exitosamente. Ya puedes iniciar sesión.' });
   } catch (error) {
     res.status(400).json({ error: 'Token expirado o inválido.' });
+  }
+});
+
+// 4. Subir Documentos KYC (Simulación)
+router.post('/upload-docs', async (req, res) => {
+  try {
+    const { userId } = req.body;
+    
+    // Simulación: En un sistema real aquí se procesarían los multipart/form-data
+    // y se guardarían las fotos en S3/Cloudinary.
+    
+    await prisma.user.update({
+      where: { id: userId },
+      data: { isVerified: true }
+    });
+
+    res.json({ message: 'Documentos verificados exitosamente.' });
+  } catch (error) {
+    res.status(500).json({ error: 'Error al verificar documentos.' });
   }
 });
 

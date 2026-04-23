@@ -19,6 +19,7 @@ model User {
   // Seguridad y Recuperación
   resetCode      String?
   resetCodeExpires DateTime?
+  isVerified     Boolean   @default(false)
   
   // Financiero
   cardBalance    Float     @default(0)
