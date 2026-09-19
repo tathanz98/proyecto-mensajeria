@@ -1,6 +1,25 @@
 {
-  "framework": "vite",
-  "buildCommand": "npm run build",
-  "devCommand": "npm run dev",
-  "installCommand": "npm install"
+  "services": {
+    "frontend": {
+      "root": "./",
+      "framework": "vite"
+    },
+    "backend": {
+      "root": "backend/"
+    }
+  },
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": {
+        "service": "backend"
+      }
+    },
+    {
+      "source": "/(.*)",
+      "destination": {
+        "service": "frontend"
+      }
+    }
+  ]
 }
