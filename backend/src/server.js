@@ -23,11 +23,19 @@ const generalLimiter = rateLimit({
   message: { error: 'Demasiadas peticiones desde esta IP. El sistema anti-fraude ha bloqueado temporalmente el acceso.' }
 });
 
-// Anti-Fraud: Escudo estricto para inicio de sesión (Evita fuerza bruta, max 5 intentos)
-const authLimiter = rateLimit({
+// Anti-Fraud: Escudo estricto SOLO para login (max 10 intentos en 15 min por IP)
+const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5,
+  max: 10,
+  skipSuccessfulRequests: true, // Solo cuenta intentos FALLIDOS
   message: { error: 'Demasiados intentos fallidos. Por seguridad, espera 15 minutos.' }
+});
+
+// Límite generoso para registro, forgot-password, upload-docs (30 peticiones en 15 min)
+const authGeneralLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  message: { error: 'Demasiadas solicitudes. Espera unos minutos e intenta de nuevo.' }
 });
 
 app.use('/api/', generalLimiter);
@@ -38,7 +46,8 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use('/api/auth', authLimiter, authRoutes);
+app.use('/api/auth/login', loginLimiter);       // Estricto: solo login
+app.use('/api/auth', authGeneralLimiter, authRoutes); // Generoso: resto de auth
 app.use('/api/orders', orderRoutes);
 app.use('/api/wallet', walletRoutes);
 
