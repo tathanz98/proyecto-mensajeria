@@ -1,100 +1,341 @@
-import { useState, useRef } from 'react';
-import {
-  Camera, Upload, X, CheckCircle, ArrowRight, Package,
-  User, Mail, Lock, AlertCircle, ShieldCheck
-} from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Mail, Lock, User, ArrowRight, Package, Camera, FileText, CheckCircle, X, AlertCircle, Upload, RotateCcw, ShieldCheck } from 'lucide-react';
 
-// ─── Componente separado para subir cada documento ───────────────────────────
+// ─── Componente separado para subir cada documento (cámara en vivo) ──────────
 function DocUploader({ label, isSelfie, file, preview, onCapture, onFile, onClear }) {
-  const camRef = useRef(null);
   const fileRef = useRef(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
 
-  const handleChange = (e) => {
-    const f = e.target.files[0];
-    if (!f) return;
-    const url = URL.createObjectURL(f);
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState('');
+  const [facingMode, setFacingMode] = useState(isSelfie ? 'user' : 'environment');
+
+  // Apaga la cámara si el componente se desmonta (evita que la luz de la cámara quede encendida)
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, []);
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+    setCameraOpen(false);
+  };
+
+  const startCamera = async (mode = facingMode) => {
+    setCameraError('');
+
+    try {
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setCameraError('Este dispositivo o navegador no permite acceso directo a la cámara.');
+        return;
+      }
+
+      stopCamera();
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: { ideal: mode },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+
+      streamRef.current = stream;
+
+      // El <video> ahora está SIEMPRE montado en el DOM (solo se oculta con CSS),
+      // así que videoRef.current nunca es null aquí, sin importar el timing.
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+      }
+
+      setCameraOpen(true);
+    } catch (error) {
+      console.error('Error cámara:', error);
+
+      if (error.name === 'NotAllowedError') {
+        setCameraError('Debes permitir el acceso a la cámara en el navegador.');
+      } else if (error.name === 'NotFoundError') {
+        setCameraError('No se encontró ninguna cámara disponible.');
+      } else if (error.name === 'NotReadableError') {
+        setCameraError('La cámara está siendo utilizada por otra aplicación.');
+      } else {
+        setCameraError('No fue posible abrir la cámara.');
+      }
+
+      setCameraOpen(false);
+    }
+  };
+
+  const takePhoto = () => {
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+
+    if (!video || !canvas) return;
+
+    const width = video.videoWidth;
+    const height = video.videoHeight;
+
+    if (!width || !height) {
+      setCameraError('La cámara todavía no está lista. Espera un segundo e inténtalo de nuevo.');
+      return;
+    }
+
+    canvas.width = width;
+    canvas.height = height;
+
+    const ctx = canvas.getContext('2d');
+
+    // Si es selfie con cámara frontal, guardamos la foto tal como el usuario la ve (en espejo),
+    // si no, la captura sale invertida respecto a la vista previa.
+    if (isSelfie && facingMode === 'user') {
+      ctx.translate(width, 0);
+      ctx.scale(-1, 1);
+    }
+
+    ctx.drawImage(video, 0, 0, width, height);
+
+    canvas.toBlob(
+      blob => {
+        if (!blob) {
+          setCameraError('No se pudo crear la fotografía.');
+          return;
+        }
+
+        const newFile = new File(
+          [blob],
+          `${isSelfie ? 'selfie' : 'cedula'}-${Date.now()}.jpg`,
+          { type: 'image/jpeg' }
+        );
+
+        const url = URL.createObjectURL(blob);
+
+        onCapture(newFile, url);
+
+        stopCamera();
+      },
+      'image/jpeg',
+      0.9
+    );
+  };
+
+  const switchCamera = async () => {
+    const newMode = facingMode === 'user' ? 'environment' : 'user';
+    setFacingMode(newMode);
+    await startCamera(newMode);
+  };
+
+  const handleFileChange = e => {
+    const selectedFile = e.target.files?.[0];
+
+    if (!selectedFile) return;
+
+    if (!selectedFile.type.startsWith('image/')) {
+      setCameraError('Selecciona una imagen válida.');
+      e.target.value = '';
+      return;
+    }
+
+    const url = URL.createObjectURL(selectedFile);
+
+    onFile(selectedFile, url);
+
     e.target.value = '';
-    if (e.target === camRef.current) onCapture(f, url);
-    else onFile(f, url);
   };
 
   return (
     <div style={{ marginBottom: '20px' }}>
-      {/* Input cámara oculto */}
-      <input
-        ref={camRef}
-        type="file"
-        accept="image/*"
-        capture={isSelfie ? 'user' : 'environment'}
-        style={{ display: 'none' }}
-        onChange={handleChange}
-      />
-      {/* Input archivo oculto */}
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*,application/pdf"
-        style={{ display: 'none' }}
-        onChange={handleChange}
-      />
-
       <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: '600', marginBottom: '10px' }}>
         {label}
       </p>
 
-      {preview ? (
-        // Vista previa de la foto capturada
-        <div style={{ position: 'relative', borderRadius: '12px', overflow: 'hidden', border: '2px solid var(--primary)' }}>
-          <img src={preview} alt={label} style={{ width: '100%', maxHeight: '160px', objectFit: 'cover', display: 'block' }} />
-          {/* Botones sobre la imagen */}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        style={{ display: 'none' }}
+        onChange={handleFileChange}
+      />
+
+      <canvas ref={canvasRef} style={{ display: 'none' }} />
+
+      {/* CÁMARA: siempre montada en el DOM, solo se oculta/muestra con CSS.
+          Esto es clave para que videoRef.current nunca sea null al conectar el stream. */}
+      <div
+        style={{
+          display: cameraOpen ? 'block' : 'none',
+          borderRadius: '16px',
+          overflow: 'hidden',
+          background: '#000',
+          marginBottom: '12px',
+          position: 'relative'
+        }}
+      >
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            width: '100%',
+            display: 'block',
+            maxHeight: '400px',
+            objectFit: 'cover',
+            transform: isSelfie && facingMode === 'user' ? 'scaleX(-1)' : 'none'
+          }}
+        />
+
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '15px',
+            left: '0',
+            right: '0',
+            display: 'flex',
+            justifyContent: 'center',
+            gap: '12px'
+          }}
+        >
+          <button
+            type="button"
+            onClick={takePhoto}
+            style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '50%',
+              border: '5px solid white',
+              background: 'var(--primary)',
+              cursor: 'pointer'
+            }}
+            title="Tomar foto"
+          />
+
+          <button
+            type="button"
+            onClick={switchCamera}
+            style={{
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              border: 'none',
+              background: 'rgba(0,0,0,0.7)',
+              color: 'white',
+              cursor: 'pointer'
+            }}
+            title="Cambiar cámara"
+          >
+            <RotateCcw size={22} />
+          </button>
+
+          <button
+            type="button"
+            onClick={stopCamera}
+            style={{
+              width: '50px',
+              height: '50px',
+              borderRadius: '50%',
+              border: 'none',
+              background: 'rgba(239,68,68,0.9)',
+              color: 'white',
+              cursor: 'pointer'
+            }}
+            title="Cerrar cámara"
+          >
+            <X size={22} />
+          </button>
+        </div>
+      </div>
+
+      {/* ERROR */}
+      {cameraError && (
+        <div
+          style={{
+            background: 'rgba(239,68,68,0.1)',
+            color: 'var(--danger)',
+            padding: '10px',
+            borderRadius: '10px',
+            marginBottom: '10px',
+            fontSize: '0.82rem'
+          }}
+        >
+          <AlertCircle size={16} style={{ verticalAlign: 'middle' }} /> {cameraError}
+        </div>
+      )}
+
+      {/* PREVIEW */}
+      {preview && !cameraOpen ? (
+        <div
+          style={{
+            position: 'relative',
+            borderRadius: '12px',
+            overflow: 'hidden',
+            border: '2px solid var(--primary)'
+          }}
+        >
+          <img
+            src={preview}
+            alt={label}
+            style={{ width: '100%', maxHeight: '240px', objectFit: 'cover', display: 'block' }}
+          />
+
           <div style={{ position: 'absolute', top: '8px', right: '8px', display: 'flex', gap: '6px' }}>
             <button
               type="button"
-              onClick={() => camRef.current?.click()}
-              title="Recapturar con cámara"
-              style={{ background: 'rgba(16,185,129,0.9)', border: 'none', borderRadius: '50%', padding: '6px', cursor: 'pointer', display: 'flex' }}
+              onClick={() => startCamera(facingMode)}
+              title="Tomar otra foto"
+              style={{ background: 'rgba(16,185,129,0.9)', border: 'none', borderRadius: '50%', padding: '8px', cursor: 'pointer' }}
             >
-              <Camera size={16} color="white" />
+              <Camera size={18} color="white" />
             </button>
+
             <button
               type="button"
-              onClick={() => onClear()}
+              onClick={onClear}
               title="Eliminar foto"
-              style={{ background: 'rgba(239,68,68,0.9)', border: 'none', borderRadius: '50%', padding: '6px', cursor: 'pointer', display: 'flex' }}
+              style={{ background: 'rgba(239,68,68,0.9)', border: 'none', borderRadius: '50%', padding: '8px', cursor: 'pointer' }}
             >
-              <X size={16} color="white" />
+              <X size={18} color="white" />
             </button>
           </div>
-          <div style={{ padding: '6px 12px', background: 'rgba(16,185,129,0.15)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <CheckCircle size={13} color="var(--primary)" />
+
+          <div style={{ padding: '8px 12px', background: 'rgba(16,185,129,0.15)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <CheckCircle size={15} color="var(--primary)" />
             <span style={{ fontSize: '0.78rem', color: 'var(--primary)', fontWeight: '600' }}>
-              {file?.name || 'Foto lista'} — toca 🗑 para cambiar
+              Foto lista
             </span>
           </div>
         </div>
-      ) : (
-        // Botones para elegir método
+      ) : !cameraOpen ? (
         <div style={{ display: 'flex', gap: '10px' }}>
-          {/* Botón cámara */}
+          {/* CÁMARA */}
           <button
             type="button"
-            onClick={() => camRef.current?.click()}
+            onClick={() => startCamera(isSelfie ? 'user' : 'environment')}
             style={{
               flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
               justifyContent: 'center', gap: '6px', padding: '18px 8px',
               borderRadius: '12px', border: '2px dashed rgba(16,185,129,0.4)',
               background: 'rgba(16,185,129,0.05)', color: 'var(--text-muted)',
-              cursor: 'pointer', fontWeight: '600', fontSize: '0.82rem',
-              transition: 'all 0.2s',
+              cursor: 'pointer', fontWeight: '600'
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--primary)'; e.currentTarget.style.color = 'var(--primary)'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(16,185,129,0.4)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
           >
             <Camera size={26} color="var(--primary)" />
-            <span>{isSelfie ? 'Tomar Selfie' : 'Usar Cámara'}</span>
+            <span>{isSelfie ? 'Tomar Selfie' : 'Tomar Foto'}</span>
           </button>
 
-          {/* Botón subir archivo */}
+          {/* ARCHIVO */}
           <button
             type="button"
             onClick={() => fileRef.current?.click()}
@@ -103,17 +344,14 @@ function DocUploader({ label, isSelfie, file, preview, onCapture, onFile, onClea
               justifyContent: 'center', gap: '6px', padding: '18px 8px',
               borderRadius: '12px', border: '2px dashed rgba(99,102,241,0.4)',
               background: 'rgba(99,102,241,0.05)', color: 'var(--text-muted)',
-              cursor: 'pointer', fontWeight: '600', fontSize: '0.82rem',
-              transition: 'all 0.2s',
+              cursor: 'pointer', fontWeight: '600'
             }}
-            onMouseEnter={e => { e.currentTarget.style.borderColor = '#6366f1'; e.currentTarget.style.color = '#6366f1'; }}
-            onMouseLeave={e => { e.currentTarget.style.borderColor = 'rgba(99,102,241,0.4)'; e.currentTarget.style.color = 'var(--text-muted)'; }}
           >
             <Upload size={26} color="#6366f1" />
-            <span>Subir Archivo</span>
+            <span>Subir Foto</span>
           </button>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -151,7 +389,7 @@ export default function Auth({ onLogin }) {
     e.preventDefault();
     setError(null);
     if (!isLogin && !acceptTerms) {
-      setError('Debes leer y aceptar el Contrato de Prestación de Servicios.');
+      setError('Debes leer y aceptar el contrato de prestación de servicios para continuar.');
       return;
     }
     try {
@@ -260,7 +498,7 @@ export default function Auth({ onLogin }) {
             <h1 style={{ fontSize: '1.4rem', fontWeight: '700', marginBottom: '6px' }}>Verificación de Identidad</h1>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: '1.6' }}>
               Toma una foto con tu cámara o sube un archivo.<br />
-              <strong style={{ color: 'var(--text-main)' }}>Sin cámara</strong>, usa "Subir Archivo" desde tu PC o galería.
+              <strong style={{ color: 'var(--text-main)' }}>Sin cámara</strong>, usa "Subir Foto" desde tu PC o galería.
             </p>
           </div>
 
@@ -270,26 +508,19 @@ export default function Auth({ onLogin }) {
           </div>
           <div style={{ display: 'flex', gap: '6px', marginBottom: '24px' }}>
             {[selfieFile, idFrontFile, idBackFile].map((f, i) => (
-              <div
-                key={i}
-                style={{
-                  flex: 1, height: '5px', borderRadius: '3px',
-                  background: f ? 'var(--primary)' : 'rgba(255,255,255,0.1)',
-                  transition: 'background 0.3s'
-                }}
-              />
+              <div key={i} style={{ flex: 1, height: '5px', borderRadius: '999px', background: f ? 'var(--primary)' : 'rgba(255,255,255,0.1)', transition: 'background 0.4s' }} />
             ))}
           </div>
 
           {error && (
-            <div className="animate-slide-up" style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', padding: '12px 16px', borderRadius: 'var(--radius-md)', marginBottom: '20px', fontSize: '0.85rem', border: '1px solid rgba(239,68,68,0.2)', display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'left' }}>
+            <div style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', padding: '10px 14px', borderRadius: '10px', marginBottom: '20px', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid rgba(239,68,68,0.2)' }}>
               <AlertCircle size={18} style={{ flexShrink: 0 }} /> {error}
             </div>
           )}
 
           <form onSubmit={handleDocumentUpload}>
             <DocUploader
-              label="1. 🤳 Selfie (rostro descubierto)"
+              label="1. 🤳 Selfie (foto de tu cara)"
               isSelfie={true}
               file={selfieFile}
               preview={selfiePreview}
@@ -299,7 +530,7 @@ export default function Auth({ onLogin }) {
             />
 
             <DocUploader
-              label="2. 🪪 Cédula (frente)"
+              label="2. 🪪 Cédula — Lado Frontal"
               isSelfie={false}
               file={idFrontFile}
               preview={idFrontPreview}
@@ -309,7 +540,7 @@ export default function Auth({ onLogin }) {
             />
 
             <DocUploader
-              label="3. 🪪 Cédula (reverso)"
+              label="3. 🪪 Cédula — Lado Trasero"
               isSelfie={false}
               file={idBackFile}
               preview={idBackPreview}
@@ -319,30 +550,36 @@ export default function Auth({ onLogin }) {
             />
 
             <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', marginBottom: '20px', textAlign: 'center', lineHeight: '1.5', padding: '10px 14px', background: 'rgba(255,255,255,0.03)', borderRadius: '10px', border: '1px solid var(--border-color)' }}>
-              💡 Si no tienes cámara, toca <strong style={{ color: 'var(--text-main)' }}>"Subir Archivo"</strong> para adjuntar una imagen o PDF desde tu computador o galería.
+              💡 Si no tienes cámara, toca <strong style={{ color: 'var(--text-main)' }}>"Subir Foto"</strong> para adjuntar una imagen desde tu computador o galería.
             </p>
 
             <button
               type="submit"
               className="btn-primary"
               disabled={!allReady || uploadingDocs}
-              style={{ width: '100%' }}
+              style={{ width: '100%', opacity: (!allReady || uploadingDocs) ? 0.4 : 1, transition: 'opacity 0.3s' }}
             >
-              {uploadingDocs ? 'Verificando...' : 'Enviar para Verificación'} <ArrowRight size={20} />
+              {uploadingDocs ? (
+                <><RotateCcw size={20} style={{ animation: 'spin 1s linear infinite' }} /> Enviando documentos...</>
+              ) : (
+                <>{allReady ? '✅' : `${readyCount}/3`} Enviar Documentos <ArrowRight size={20} /></>
+              )}
             </button>
           </form>
         </div>
+
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
-  // ── Step 3: Bienvenida ───────────────────────────────────────────────────────
+  // ── Step 3: Bienvenida ─────────────────────────────────────────────────────
   if (registrationStep === 3) {
     return (
-      <div className="view-container animate-fade-in" style={{ justifyContent: 'center', alignItems: 'center', textAlign: 'center' }}>
-        <div className="glass-panel animate-slide-up" style={{ width: '100%', padding: '32px 24px' }}>
-          <div style={{ display: 'inline-flex', padding: '16px', borderRadius: '50%', background: 'rgba(16,185,129,0.2)', marginBottom: '24px' }}>
-            <CheckCircle size={48} color="var(--primary)" />
+      <div className="view-container animate-fade-in" style={{ justifyContent: 'center', alignItems: 'center' }}>
+        <div className="glass-panel animate-slide-up" style={{ width: '100%', padding: '32px 24px', textAlign: 'center' }}>
+          <div style={{ display: 'inline-flex', padding: '24px', borderRadius: '50%', background: 'rgba(16,185,129,0.2)', marginBottom: '24px' }}>
+            <CheckCircle size={64} color="var(--primary)" />
           </div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: '700', marginBottom: '16px' }}>¡Bienvenido al Equipo!</h1>
           <p style={{ color: 'var(--text-muted)', marginBottom: '32px' }}>
@@ -356,30 +593,18 @@ export default function Auth({ onLogin }) {
     );
   }
 
-  // ── Recuperar contraseña ──────────────────────────────────────────────────
+  // ── Recuperar contraseña ───────────────────────────────────────────────────
   if (forgotPasswordMode) {
     return (
       <div className="view-container animate-fade-in" style={{ justifyContent: 'center', alignItems: 'center' }}>
         <div className="glass-panel animate-slide-up" style={{ width: '100%', padding: '32px 24px' }}>
-          <h1 style={{ fontSize: '1.5rem', fontWeight: '700', marginBottom: '8px', textAlign: 'center' }}>Recuperar Contraseña</h1>
-          <p style={{ color: 'var(--text-muted)', marginBottom: '24px', textAlign: 'center', fontSize: '0.9rem' }}>
-            {resetStep === 1
-              ? 'Ingresa tu correo para recibir un código.'
-              : resetStep === 2
-              ? 'Ingresa el código que recibiste.'
-              : 'Crea tu nueva contraseña.'}
-          </p>
+          <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+            <ShieldCheck size={48} color="var(--primary)" />
+            <h2 style={{ marginTop: '16px' }}>Recuperar Contraseña</h2>
+          </div>
 
-          {error && (
-            <div style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', padding: '12px 16px', borderRadius: 'var(--radius-md)', marginBottom: '20px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px', textAlign: 'left' }}>
-              <AlertCircle size={18} style={{ flexShrink: 0 }} /> {error}
-            </div>
-          )}
-          {successMsg && (
-            <div style={{ background: 'rgba(16,185,129,0.1)', color: 'var(--primary)', padding: '12px 16px', borderRadius: 'var(--radius-md)', marginBottom: '20px', fontSize: '0.9rem', textAlign: 'left' }}>
-              {successMsg}
-            </div>
-          )}
+          {error && <div style={{ background: 'rgba(239,68,68,0.1)', color: 'var(--danger)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}><AlertCircle size={18} /> {error}</div>}
+          {successMsg && <div style={{ background: 'rgba(16,185,129,0.1)', color: 'var(--primary)', padding: '12px', borderRadius: '8px', marginBottom: '16px', fontSize: '0.9rem' }}>{successMsg}</div>}
 
           <form onSubmit={handleForgotPassword}>
             {resetStep === 1 && (
@@ -391,7 +616,7 @@ export default function Auth({ onLogin }) {
             {resetStep === 2 && (
               <div className="input-group">
                 <label>Código de 6 dígitos</label>
-                <input type="text" value={resetCode} onChange={e => setResetCode(e.target.value)} placeholder="Ej: 123456" maxLength={6} required className="input-field" />
+                <input type="text" value={resetCode} onChange={e => setResetCode(e.target.value)} placeholder="Ej: 123456" maxLength={6} required className="input-field" style={{ letterSpacing: '4px', textAlign: 'center', fontSize: '1.2rem' }} />
               </div>
             )}
             {resetStep === 3 && (
