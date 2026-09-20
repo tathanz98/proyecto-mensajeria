@@ -3,6 +3,10 @@ import { ArrowLeft, Phone, MessageSquare, Navigation } from 'lucide-react';
 import { MapContainer, TileLayer, Marker, Polyline } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
+import OrderChat from './OrderChat';
+
+const pickupLocation = [4.6097, -74.0817];
+const dropoffLocation = [4.6180, -74.0850];
 
 // Fix for leafet default markers
 const pickupIcon = L.divIcon({
@@ -26,14 +30,11 @@ const driverIcon = L.divIcon({
   iconAnchor: [18, 18]
 });
 
-export default function OrderTracking({ onNavigate }) {
+export default function OrderTracking({ onNavigate, order }) {
   const [stage, setStage] = useState('pickup'); // 'pickup' or 'dropoff'
   const [showPinModal, setShowPinModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
-  
-  // Bogota coordinates
-  const pickupLocation = [4.6097, -74.0817];
-  const dropoffLocation = [4.6180, -74.0850];
+  const [showChat, setShowChat] = useState(false);
   
   // Dynamic driver location to simulate movement
   const [driverLocation, setDriverLocation] = useState([4.6050, -74.0800]);
@@ -124,7 +125,7 @@ export default function OrderTracking({ onNavigate }) {
         </div>
 
         <div style={{ display: 'flex', gap: '16px', marginBottom: '24px' }}>
-          <button className="btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '0.9rem' }}>
+          <button className="btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '0.9rem' }} onClick={() => setShowChat(true)}>
             <MessageSquare size={18} /> Chat
           </button>
           <button className="btn-secondary" style={{ flex: 1, padding: '8px', fontSize: '0.9rem' }}>
@@ -182,6 +183,8 @@ export default function OrderTracking({ onNavigate }) {
           </div>
         </div>
       )}
+
+      {showChat && order?.id && <OrderChat orderId={order.id} onClose={() => setShowChat(false)} />}
 
     </div>
   );

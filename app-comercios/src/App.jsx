@@ -8,7 +8,7 @@ function App() {
 
   return (
     <div className="dashboard-container">
-      {currentView === 'auth' && <Auth onLogin={() => setCurrentView('dashboard')} />}
+      {currentView === 'auth' && <Auth onLogin={(business) => { localStorage.setItem('businessId', business.id); localStorage.setItem('businessName', business.name || 'Mi comercio'); setCurrentView('dashboard'); }} />}
       {currentView === 'dashboard' && <Dashboard onNavigate={setCurrentView} />}
       {currentView === 'menu' && <MenuManager onNavigate={setCurrentView} />}
     </div>

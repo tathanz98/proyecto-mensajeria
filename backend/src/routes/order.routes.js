@@ -6,6 +6,27 @@ const prisma = new PrismaClient();
 // Utility to generate 4-digit PIN
 const generatePin = () => Math.floor(1000 + Math.random() * 9000).toString();
 
+router.get('/courier/:courierId/stats', async (req, res) => {
+  try {
+    const startOfDay = new Date();
+    startOfDay.setHours(0, 0, 0, 0);
+
+    const [trips, earnings] = await Promise.all([
+      prisma.order.count({
+        where: { courierId: req.params.courierId, status: 'DELIVERED', updatedAt: { gte: startOfDay } }
+      }),
+      prisma.ledger.aggregate({
+        where: { userId: req.params.courierId, type: 'EARNING', createdAt: { gte: startOfDay } },
+        _sum: { amount: true }
+      })
+    ]);
+
+    res.json({ trips, earnings: earnings._sum.amount || 0 });
+  } catch (error) {
+    res.status(500).json({ error: 'No fue posible consultar las ganancias.' });
+  }
+});
+
 // Create order (Called by Business)
 router.post('/create', async (req, res) => {
   try {
@@ -53,6 +74,59 @@ router.post('/:orderId/accept', async (req, res) => {
     res.json({ message: 'Order accepted', order: updated });
   } catch (error) {
     res.status(500).json({ error: 'Server error' });
+  }
+});
+
+// Courier rejects an offer. The order stays available for other couriers.
+router.post('/:orderId/reject', async (req, res) => {
+  try {
+    const order = await prisma.order.findUnique({ where: { id: req.params.orderId } });
+    if (!order || order.status !== 'PENDING') {
+      return res.status(400).json({ error: 'El pedido ya no está disponible.' });
+    }
+
+    req.io.emit('order_rejected', { orderId: order.id, courierId: req.body.courierId });
+    res.json({ message: 'Oferta rechazada. Seguiremos buscando pedidos para ti.' });
+  } catch (error) {
+    res.status(500).json({ error: 'No fue posible rechazar el pedido.' });
+  }
+});
+
+router.get('/:orderId/messages', async (req, res) => {
+  try {
+    const messages = await prisma.message.findMany({
+      where: { orderId: req.params.orderId },
+      orderBy: { createdAt: 'asc' }
+    });
+    res.json(messages);
+  } catch (error) {
+    res.status(500).json({ error: 'No fue posible cargar el chat.' });
+  }
+});
+
+router.post('/:orderId/messages', async (req, res) => {
+  try {
+    const content = req.body.content?.trim();
+    const senderRole = req.body.senderRole === 'CUSTOMER' ? 'CUSTOMER' : 'COURIER';
+    if (!content) return res.status(400).json({ error: 'Escribe un mensaje antes de enviarlo.' });
+
+    const message = await prisma.message.create({
+      data: { orderId: req.params.orderId, content, senderRole }
+    });
+    req.io.emit('order_message', message);
+    res.status(201).json(message);
+  } catch (error) {
+    res.status(500).json({ error: 'No fue posible enviar el mensaje.' });
+  }
+});
+
+router.delete('/:orderId/messages', async (req, res) => {
+  try {
+    await prisma.message.deleteMany({ where: { orderId: req.params.orderId } });
+    req.io.emit('order_chat_cleared', { orderId: req.params.orderId });
+    res.json({ message: 'Chat eliminado.' });
+  } catch (error) {
+    res.status(500).json({ error: 'No fue posible eliminar el chat.' });
   }
 });
 

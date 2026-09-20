@@ -3,12 +3,31 @@ import { Store, MapPin, Tag, Mail, Lock, ArrowRight } from 'lucide-react';
 
 export default function Auth({ onLogin }) {
   const [isLogin, setIsLogin] = useState(false); // Default to register for businesses
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const apiBase = import.meta.env.VITE_API_URL?.replace(/\/$/, '') || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    setTimeout(() => {
-      onLogin();
-    }, 500);
+    setError('');
+    setSubmitting(true);
+    try {
+      const response = await fetch(`${apiBase}/api/auth${isLogin ? '/login' : '/register'}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(isLogin ? { email, password } : { email, password, name, role: 'BUSINESS', bankAccount: 'No aplica' })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'No fue posible acceder al comercio.');
+      onLogin({ id: data.userId || data.user?.id, name: data.user?.name || name });
+    } catch (submitError) {
+      setError(submitError.message || 'No fue posible conectar con el servidor.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -35,7 +54,7 @@ export default function Auth({ onLogin }) {
                 <label>Nombre del Establecimiento</label>
                 <div style={{ position: 'relative' }}>
                   <Store size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: 'var(--text-muted)' }} />
-                  <input type="text" className="input-field" placeholder="Ej: Hamburguesas El Corral" style={{ paddingLeft: '40px' }} required />
+                  <input type="text" className="input-field" placeholder="Ej: Hamburguesas El Corral" style={{ paddingLeft: '40px' }} required value={name} onChange={event => setName(event.target.value)} />
                 </div>
               </div>
 
@@ -73,7 +92,7 @@ export default function Auth({ onLogin }) {
             <label>Correo Electrónico Corporativo</label>
             <div style={{ position: 'relative' }}>
               <Mail size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: 'var(--text-muted)' }} />
-              <input type="email" className="input-field" placeholder="contacto@negocio.com" style={{ paddingLeft: '40px' }} required />
+              <input type="email" className="input-field" placeholder="contacto@negocio.com" style={{ paddingLeft: '40px' }} required value={email} onChange={event => setEmail(event.target.value)} />
             </div>
           </div>
 
@@ -81,12 +100,13 @@ export default function Auth({ onLogin }) {
             <label>Contraseña</label>
             <div style={{ position: 'relative' }}>
               <Lock size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: 'var(--text-muted)' }} />
-              <input type="password" className="input-field" placeholder="••••••••" style={{ paddingLeft: '40px' }} required />
+              <input type="password" className="input-field" placeholder="Mín. 8 caracteres, mayúscula y número" style={{ paddingLeft: '40px' }} required value={password} onChange={event => setPassword(event.target.value)} />
             </div>
           </div>
 
-          <button type="submit" className="btn-primary" style={{ width: '100%', padding: '14px', fontSize: '1.05rem', marginBottom: '24px' }}>
-            {isLogin ? 'Ingresar al Portal' : 'Comenzar a Vender'}
+          {error && <p style={{ color: 'var(--danger)', marginBottom: '16px', fontSize: '0.9rem' }}>{error}</p>}
+          <button type="submit" disabled={submitting} className="btn-primary" style={{ width: '100%', padding: '14px', fontSize: '1.05rem', marginBottom: '24px', opacity: submitting ? 0.7 : 1 }}>
+            {submitting ? 'Conectando...' : isLogin ? 'Ingresar al Portal' : 'Comenzar a Vender'}
             <ArrowRight size={20} />
           </button>
         </form>

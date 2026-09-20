@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { apiUrl } from '../api';
 import { ArrowLeft, CreditCard, Building2, Plus, ArrowUpRight, Copy, ScanLine, X, Lock, Unlock, Eye, EyeOff, RefreshCw, AlertTriangle, Send } from 'lucide-react';
 
 export default function Wallet({ onNavigate }) {
@@ -20,7 +21,7 @@ export default function Wallet({ onNavigate }) {
 
   useEffect(() => {
     if (userId) {
-      fetch(`${import.meta.env.VITE_API_URL}/api/wallet/balance/${userId}`)
+      fetch(apiUrl(`/api/wallet/balance/${userId}`))
         .then(res => res.json())
         .then(data => setFinancials(data))
         .catch(err => console.error(err));
@@ -56,7 +57,7 @@ export default function Wallet({ onNavigate }) {
   const handlePayDebt = async (e) => {
     if (e) e.preventDefault();
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/wallet/pay-debt`, {
+      const res = await fetch(apiUrl('/api/wallet/pay-debt'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId })
@@ -69,7 +70,7 @@ export default function Wallet({ onNavigate }) {
       } else {
         alert(data.error);
       }
-    } catch (err) {
+    } catch {
       alert('Error al procesar pago');
     }
   };
@@ -387,14 +388,6 @@ export default function Wallet({ onNavigate }) {
             </button>
           </div>
           
-          <style>{`
-            @keyframes scan {
-              0% { top: 0; opacity: 0; }
-              10% { opacity: 1; }
-              90% { opacity: 1; }
-              100% { top: 100%; opacity: 0; }
-            }
-          `}</style>
         </div>
       )}
 

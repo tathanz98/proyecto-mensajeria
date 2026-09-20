@@ -2,10 +2,18 @@ const express = require('express');
 const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = 'supersecretkey123'; // Demo key
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, callback) => {
+    callback(null, file.mimetype.startsWith('image/'));
+  }
+});
 
 router.post('/register', async (req, res) => {
   try {
@@ -130,9 +138,21 @@ router.post('/reset-password', async (req, res) => {
 });
 
 // 4. Subir Documentos KYC (Simulación)
-router.post('/upload-docs', async (req, res) => {
+// Multer procesa el multipart/form-data creado por FormData en el frontend.
+router.post('/upload-docs', upload.fields([
+  { name: 'selfie', maxCount: 1 },
+  { name: 'idFront', maxCount: 1 },
+  { name: 'idBack', maxCount: 1 }
+]), async (req, res) => {
   try {
     const { userId } = req.body;
+
+    const hasAllDocuments = ['selfie', 'idFront', 'idBack']
+      .every(field => req.files?.[field]?.[0]);
+
+    if (!userId || !hasAllDocuments) {
+      return res.status(400).json({ error: 'Debes enviar la selfie y ambos lados de la cédula.' });
+    }
     
     // Simulación: En un sistema real aquí se procesarían los multipart/form-data
     // y se guardarían las fotos en S3/Cloudinary.

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { Mail, Lock, User, ArrowRight, Package, Camera, FileText, CheckCircle, X, AlertCircle, Upload, RotateCcw, ShieldCheck } from 'lucide-react';
+import { Mail, Lock, User, ArrowRight, Package, Camera, CheckCircle, X, AlertCircle, Upload, RotateCcw, ShieldCheck } from 'lucide-react';
+import { apiUrl } from '../api';
 
 // ─── Componente separado para subir cada documento (cámara en vivo) ──────────
-function DocUploader({ label, isSelfie, file, preview, onCapture, onFile, onClear }) {
+function DocUploader({ label, isSelfie, preview, onCapture, onFile, onClear }) {
   const fileRef = useRef(null);
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -398,7 +399,7 @@ export default function Auth({ onLogin }) {
         ? { email, password }
         : { email, password, name, vehicle, role: 'COURIER', bankAccount: 'Bancolombia' };
 
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth${endpoint}`, {
+      const res = await fetch(apiUrl(`/api/auth${endpoint}`), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body)
@@ -417,7 +418,7 @@ export default function Auth({ onLogin }) {
         setRegistrationStep(2);
       }
     } catch {
-      setError('Error de red. Asegúrate de que el Backend esté corriendo en el puerto 3000.');
+      setError('No fue posible conectar con el servidor. Verifica que la API esté disponible y que VITE_API_URL esté configurada correctamente.');
     }
   };
 
@@ -426,7 +427,7 @@ export default function Auth({ onLogin }) {
     setError(''); setSuccessMsg('');
     try {
       if (resetStep === 1) {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/forgot-password`, {
+        const res = await fetch(apiUrl('/api/auth/forgot-password'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email })
         });
@@ -434,7 +435,7 @@ export default function Auth({ onLogin }) {
         if (res.ok) { setSuccessMsg(`Código enviado. (Demo - Código: ${data.simulatedCode})`); setResetStep(2); }
         else setError(data.error);
       } else if (resetStep === 2) {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/verify-code`, {
+        const res = await fetch(apiUrl('/api/auth/verify-code'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, code: resetCode })
         });
@@ -442,7 +443,7 @@ export default function Auth({ onLogin }) {
         if (res.ok) { setTempToken(data.tempToken); setSuccessMsg('Código verificado. Ingresa tu nueva contraseña.'); setResetStep(3); }
         else setError(data.error);
       } else if (resetStep === 3) {
-        const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/reset-password`, {
+        const res = await fetch(apiUrl('/api/auth/reset-password'), {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ tempToken, newPassword: password })
         });
@@ -468,7 +469,7 @@ export default function Auth({ onLogin }) {
       formData.append('idFront', idFrontFile);
       formData.append('idBack', idBackFile);
 
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/auth/upload-docs`, {
+      const res = await fetch(apiUrl('/api/auth/upload-docs'), {
         method: 'POST',
         body: formData,
       });
@@ -522,7 +523,6 @@ export default function Auth({ onLogin }) {
             <DocUploader
               label="1. 🤳 Selfie (foto de tu cara)"
               isSelfie={true}
-              file={selfieFile}
               preview={selfiePreview}
               onCapture={(f, url) => { setSelfieFile(f); setSelfiePreview(url); }}
               onFile={(f, url) => { setSelfieFile(f); setSelfiePreview(url); }}
@@ -532,7 +532,6 @@ export default function Auth({ onLogin }) {
             <DocUploader
               label="2. 🪪 Cédula — Lado Frontal"
               isSelfie={false}
-              file={idFrontFile}
               preview={idFrontPreview}
               onCapture={(f, url) => { setIdFrontFile(f); setIdFrontPreview(url); }}
               onFile={(f, url) => { setIdFrontFile(f); setIdFrontPreview(url); }}
@@ -542,7 +541,6 @@ export default function Auth({ onLogin }) {
             <DocUploader
               label="3. 🪪 Cédula — Lado Trasero"
               isSelfie={false}
-              file={idBackFile}
               preview={idBackPreview}
               onCapture={(f, url) => { setIdBackFile(f); setIdBackPreview(url); }}
               onFile={(f, url) => { setIdBackFile(f); setIdBackPreview(url); }}
@@ -568,7 +566,6 @@ export default function Auth({ onLogin }) {
           </form>
         </div>
 
-        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }

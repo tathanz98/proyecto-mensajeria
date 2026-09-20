@@ -1,21 +1,41 @@
 import { useState } from 'react';
-import { Camera, Upload, CheckCircle, ArrowLeft, Image as ImageIcon } from 'lucide-react';
+import { Camera, CheckCircle, ArrowLeft, Image as ImageIcon } from 'lucide-react';
+import { apiUrl } from '../api';
 
-export default function DeliveryProof({ onNavigate }) {
+export default function DeliveryProof({ onNavigate, order, onOrderCompleted }) {
   const [photoTaken, setPhotoTaken] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [customerPin, setCustomerPin] = useState('');
 
-  const handleComplete = () => {
+  const handleComplete = async () => {
     if (customerPin.length !== 4) {
       alert('Debes ingresar el código de 4 dígitos proporcionado por el cliente.');
       return;
     }
+    if (!order?.id) {
+      alert('No se encontró el pedido activo. Regresa al panel y vuelve a abrirlo.');
+      return;
+    }
     setSubmitting(true);
-    setTimeout(() => {
-      setSubmitting(false);
+    try {
+      const response = await fetch(apiUrl(`/api/orders/${order.id}/complete`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: customerPin })
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        alert(data.error || 'No fue posible finalizar el pedido.');
+        return;
+      }
+      onOrderCompleted?.();
+      alert('Entrega finalizada. Tus ganancias y viajes ya se actualizaron.');
       onNavigate('dashboard');
-    }, 1500);
+    } catch {
+      alert('No fue posible conectar para finalizar el pedido.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (

@@ -4,12 +4,12 @@ import { io } from 'socket.io-client';
 
 export default function Dashboard({ onNavigate }) {
   const [validatingOrder, setValidatingOrder] = useState(null);
-  const [pin, setPin] = useState('');
   
   const [orders, setOrders] = useState([]);
+  const apiBase = import.meta.env.VITE_API_URL?.replace(/\/$/, '') || (import.meta.env.DEV ? 'http://localhost:3000' : '');
 
   useEffect(() => {
-    const socket = io(import.meta.env.VITE_API_URL);
+    const socket = io(apiBase);
     
     socket.on('order_accepted', ({ orderId, courierName }) => {
       setOrders(prevOrders => prevOrders.map(order => {
@@ -21,34 +21,26 @@ export default function Dashboard({ onNavigate }) {
     });
 
     return () => socket.disconnect();
-  }, []);
+  }, [apiBase]);
 
   const handleCreateOrder = async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/api/orders/create`, {
+      const businessId = localStorage.getItem('businessId');
+      if (!businessId) throw new Error('Inicia sesión de nuevo para crear pedidos.');
+      const res = await fetch(`${apiBase}/api/orders/create`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ businessId: 'demo-business-id', price: 25000 })
+        body: JSON.stringify({ businessId, price: 25000 })
       });
       const data = await res.json();
       if (res.ok) {
         setOrders([...orders, { ...data, customer: 'Cliente Final', status: 'preparing', driver: 'Buscando...' }]);
         alert('¡Pedido enviado a los domiciliarios! Esperando confirmación...');
+      } else {
+        alert(data.error || 'No fue posible crear el pedido.');
       }
     } catch (err) {
-      alert('Error de conexión. Asegúrate que el backend (puerto 3000) esté corriendo.');
-    }
-  };
-
-  const handleValidate = (e) => {
-    e.preventDefault();
-    if (pin === '1234') { // Fake PIN validation
-      setOrders(orders.filter(o => o.id !== validatingOrder.id));
-      setValidatingOrder(null);
-      setPin('');
-      alert('¡Código validado! Pedido entregado al domiciliario con éxito.');
-    } else {
-      alert('Código incorrecto. Verifica con el domiciliario.');
+      alert(err.message || 'Error de conexión. Asegúrate que el backend esté corriendo.');
     }
   };
 
