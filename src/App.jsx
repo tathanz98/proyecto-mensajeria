@@ -1,6 +1,7 @@
 import { Component, useState, useEffect } from 'react'
 import { io } from 'socket.io-client'
 import { BellRing, X, Check } from 'lucide-react'
+import { Analytics } from '@vercel/analytics/react'
 import Auth from './components/Auth'
 import Dashboard from './components/Dashboard'
 import OrderTracking from './components/OrderTracking'
@@ -179,6 +180,7 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <AppContent />
+      <Analytics />
     </AppErrorBoundary>
   )
 }
