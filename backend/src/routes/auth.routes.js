@@ -1,12 +1,14 @@
 const express = require('express');
-const { PrismaClient } = require('@prisma/client');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const rateLimit = require('express-rate-limit');
+const { authenticate, getJwtSecret, prisma } = require('../auth');
 
 const router = express.Router();
-const prisma = new PrismaClient();
-const JWT_SECRET = 'supersecretkey123'; // Demo key
+const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: true, legacyHeaders: false });
+const registerLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
+const resetLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 5, standardHeaders: true, legacyHeaders: false });
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
@@ -15,13 +17,23 @@ const upload = multer({
   }
 });
 
-router.post('/register', async (req, res) => {
+router.post('/register', registerLimiter, async (req, res) => {
   try {
     const { email, password, name, role, bankAccount, vehicle } = req.body;
-    
+
+    if (typeof email !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      return res.status(400).json({ error: 'El correo electrónico no es válido.' });
+    }
+    if (typeof name !== 'string' || !name.trim()) {
+      return res.status(400).json({ error: 'El nombre es obligatorio.' });
+    }
+    if (!['COURIER', 'BUSINESS'].includes(role)) {
+      return res.status(400).json({ error: 'El tipo de cuenta no es válido.' });
+    }
+
     // Validación Estricta de Contraseña
     const passwordRegex = /^(?=.*[A-Z])(?=.*\d).{8,}$/;
-    if (!passwordRegex.test(password)) {
+    if (typeof password !== 'string' || !passwordRegex.test(password)) {
       return res.status(400).json({ error: 'La contraseña debe tener al menos 8 caracteres, una mayúscula y un número.' });
     }
 
@@ -32,125 +44,216 @@ router.post('/register', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await prisma.user.create({
-      data: { email, password: hashedPassword, name, role, bankAccount, vehicle }
+      data: {
+        email: email.trim().toLowerCase(),
+        password: hashedPassword,
+        name: name.trim().slice(0, 80),
+        role,
+        bankAccount: typeof bankAccount === 'string' ? bankAccount.trim().slice(0, 80) || null : null,
+        vehicle: role === 'COURIER' ? vehicle : null
+      }
     });
-    res.json({ message: 'User registered successfully', userId: user.id });
+    const token = jwt.sign({ userId: user.id, role: user.role }, getJwtSecret(), { expiresIn: '1d', algorithm: 'HS256' });
+    res.json({
+      message: 'User registered successfully',
+      userId: user.id,
+      token,
+      user: { id: user.id, name: user.name, role: user.role, isVerified: user.isVerified }
+    });
   } catch (error) {
+    if (error.code === 'P2002') {
+      return res.status(400).json({ error: 'Ese correo ya está registrado.' });
+    }
     res.status(400).json({ error: 'Registration failed or email exists' });
   }
 });
 
-router.post('/login', async (req, res) => {
+router.get('/me', authenticate, async (req, res) => {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: req.user.id },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        vehicle: true,
+        bankAccount: true,
+        isVerified: true,
+        cardBalance: true,
+        debt: true,
+        isBlocked: true,
+        dailyOrderLimit: true,
+        isOnline: true,
+        lastLat: true,
+        lastLng: true,
+        lastLocationAt: true,
+        serviceRadiusKm: true,
+        createdAt: true
+      }
+    });
+    if (!user) return res.status(404).json({ error: 'Usuario no encontrado.' });
+    res.json(user);
+  } catch {
+    res.status(500).json({ error: 'No fue posible cargar tu perfil.' });
+  }
+});
+
+router.patch('/me', authenticate, async (req, res) => {
+  try {
+    const data = {};
+    if (typeof req.body.name === 'string' && req.body.name.trim()) {
+      data.name = req.body.name.trim().slice(0, 80);
+    }
+    if (typeof req.body.bankAccount === 'string') {
+      data.bankAccount = req.body.bankAccount.trim().slice(0, 80) || null;
+    }
+    if (req.user.role === 'COURIER' && req.body.vehicle !== undefined) {
+      if (!['Moto', 'Bicicleta', 'Carro'].includes(req.body.vehicle)) {
+        return res.status(400).json({ error: 'Vehículo no válido.' });
+      }
+      data.vehicle = req.body.vehicle;
+    }
+    if (req.user.role === 'BUSINESS' && req.body.dailyOrderLimit !== undefined) {
+      if (req.body.dailyOrderLimit === null || req.body.dailyOrderLimit === '') {
+        data.dailyOrderLimit = null;
+      } else {
+        const limit = Number(req.body.dailyOrderLimit);
+        if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+          return res.status(400).json({
+            error: 'El límite diario debe ser un número entero entre 1 y 500, o vacío para no limitar.'
+          });
+        }
+        data.dailyOrderLimit = limit;
+      }
+    }
+    if (!Object.keys(data).length) {
+      return res.status(400).json({ error: 'No hay datos para actualizar.' });
+    }
+
+    const user = await prisma.user.update({
+      where: { id: req.user.id },
+      data,
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        role: true,
+        vehicle: true,
+        bankAccount: true,
+        isVerified: true,
+        cardBalance: true,
+        debt: true,
+        isBlocked: true,
+        dailyOrderLimit: true,
+        isOnline: true,
+        lastLat: true,
+        lastLng: true,
+        lastLocationAt: true,
+        serviceRadiusKm: true
+      }
+    });
+    res.json(user);
+  } catch {
+    res.status(500).json({ error: 'No fue posible actualizar tu perfil.' });
+  }
+});
+
+// Disponibilidad del domiciliario: al conectarse se guarda su ubicación y la zona
+// donde acepta pedidos, para que el despacho solo le muestre los cercanos.
+router.patch('/availability', authenticate, async (req, res) => {
+  if (req.user.role !== 'COURIER') {
+    return res.status(403).json({ error: 'Solo los domiciliarios manejan su disponibilidad.' });
+  }
+
+  const { isOnline, lat, lng, serviceRadiusKm } = req.body || {};
+  if (typeof isOnline !== 'boolean') {
+    return res.status(400).json({ error: 'Indica si estás disponible para recibir pedidos.' });
+  }
+
+  const data = { isOnline };
+
+  if (isOnline) {
+    const latitude = Number(lat);
+    const longitude = Number(lng);
+    const inColombia = Number.isFinite(latitude) && Number.isFinite(longitude)
+      && latitude >= -5 && latitude <= 14
+      && longitude >= -83 && longitude <= -66;
+    if (!inColombia) {
+      return res.status(400).json({ error: 'Activa la ubicación del teléfono para conectarte y recibir pedidos.' });
+    }
+    data.lastLat = latitude;
+    data.lastLng = longitude;
+    data.lastLocationAt = new Date();
+  }
+
+  if (serviceRadiusKm !== undefined) {
+    const radius = Number(serviceRadiusKm);
+    if (!Number.isInteger(radius) || radius < 1 || radius > 50) {
+      return res.status(400).json({ error: 'La zona de trabajo debe estar entre 1 y 50 km.' });
+    }
+    data.serviceRadiusKm = radius;
+  }
+
+  try {
+    const user = await prisma.user.update({
+      where: { id: req.user.id },
+      data,
+      select: {
+        id: true,
+        isOnline: true,
+        lastLat: true,
+        lastLng: true,
+        lastLocationAt: true,
+        serviceRadiusKm: true
+      }
+    });
+    res.json(user);
+  } catch {
+    res.status(500).json({ error: 'No fue posible guardar tu disponibilidad.' });
+  }
+});
+
+router.post('/login', loginLimiter, async (req, res) => {
   try {
     const { email, password } = req.body;
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user || !(await bcrypt.compare(password, user.password))) {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
-    const token = jwt.sign({ userId: user.id, role: user.role }, JWT_SECRET, { expiresIn: '1d' });
+    const token = jwt.sign({ userId: user.id, role: user.role }, getJwtSecret(), { expiresIn: '1d', algorithm: 'HS256' });
     res.json({ message: 'Login successful', token, user: { id: user.id, name: user.name, role: user.role, isVerified: user.isVerified } });
   } catch (error) {
     res.status(500).json({ error: 'Error logging in' });
   }
 });
 
-// 1. Solicitar Código de Recuperación (Forgot Password)
-router.post('/forgot-password', async (req, res) => {
-  try {
-    const { email } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
-    
-    if (!user) {
-      // Devolvemos 200 aunque no exista para evitar escaneo de correos, o error si preferimos.
-      return res.status(404).json({ error: 'Si el correo existe, se ha enviado un código.' });
-    }
-
-    // Generar código numérico de 6 dígitos
-    const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const resetCodeExpires = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
-
-    await prisma.user.update({
-      where: { email },
-      data: { resetCode, resetCodeExpires }
-    });
-
-    // SIMULACIÓN DE ENVÍO DE CORREO / SMS:
-    console.log(`[SIMULACRO SMS/EMAIL] Código para ${email}: ${resetCode}`);
-    
-    res.json({ message: 'Código de 6 dígitos enviado al correo/celular.', simulatedCode: resetCode });
-  } catch (error) {
-    res.status(500).json({ error: 'Error procesando la solicitud' });
-  }
+router.post('/forgot-password', resetLimiter, (req, res) => {
+  res.status(503).json({
+    error: 'La recuperación de contraseña no está disponible hasta configurar un canal de correo o SMS verificado.'
+  });
 });
 
-// 2. Verificar Código (Verify Code)
-router.post('/verify-code', async (req, res) => {
-  try {
-    const { email, code } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
-
-    if (!user || user.resetCode !== code) {
-      return res.status(400).json({ error: 'Código incorrecto.' });
-    }
-
-    if (new Date() > user.resetCodeExpires) {
-      return res.status(400).json({ error: 'El código ha expirado.' });
-    }
-
-    // Código válido, devolver un token temporal para permitir cambiar la contraseña
-    const tempToken = jwt.sign({ userId: user.id, resetAllowed: true }, process.env.JWT_SECRET || 'super-secret', { expiresIn: '15m' });
-    
-    res.json({ message: 'Código verificado correctamente.', tempToken });
-  } catch (error) {
-    res.status(500).json({ error: 'Error verificando el código' });
-  }
+router.post('/verify-code', resetLimiter, (req, res) => {
+  res.status(503).json({ error: 'La recuperación de contraseña no está disponible.' });
 });
 
-// 3. Restablecer Contraseña (Reset Password)
-router.post('/reset-password', async (req, res) => {
-  try {
-    const { tempToken, newPassword } = req.body;
-    
-    const decoded = jwt.verify(tempToken, process.env.JWT_SECRET || 'super-secret');
-    if (!decoded.resetAllowed) return res.status(403).json({ error: 'Token inválido.' });
-
-    // Validar seguridad de la nueva contraseña
-    const passRegex = /^(?=.*[A-Z])(?=.*\d)[A-Za-z\d@$!%*?&]{8,}$/;
-    if (!passRegex.test(newPassword)) {
-      return res.status(400).json({ error: 'La contraseña debe tener 8 caracteres, 1 mayúscula y 1 número.' });
-    }
-
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    await prisma.user.update({
-      where: { id: decoded.userId },
-      data: { 
-        password: hashedPassword,
-        resetCode: null,
-        resetCodeExpires: null
-      }
-    });
-
-    res.json({ message: 'Contraseña restablecida exitosamente. Ya puedes iniciar sesión.' });
-  } catch (error) {
-    res.status(400).json({ error: 'Token expirado o inválido.' });
-  }
+router.post('/reset-password', resetLimiter, (req, res) => {
+  res.status(503).json({ error: 'La recuperación de contraseña no está disponible.' });
 });
 
 // 4. Subir Documentos KYC (Simulación)
 // Multer procesa el multipart/form-data creado por FormData en el frontend.
-router.post('/upload-docs', upload.fields([
+router.post('/upload-docs', authenticate, upload.fields([
   { name: 'selfie', maxCount: 1 },
   { name: 'idFront', maxCount: 1 },
   { name: 'idBack', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    const { userId } = req.body;
-
     const hasAllDocuments = ['selfie', 'idFront', 'idBack']
       .every(field => req.files?.[field]?.[0]);
 
-    if (!userId || !hasAllDocuments) {
+    if (!hasAllDocuments) {
       return res.status(400).json({ error: 'Debes enviar la selfie y ambos lados de la cédula.' });
     }
     
@@ -158,7 +261,7 @@ router.post('/upload-docs', upload.fields([
     // y se guardarían las fotos en S3/Cloudinary.
     
     await prisma.user.update({
-      where: { id: userId },
+      where: { id: req.user.id },
       data: { isVerified: true }
     });
 

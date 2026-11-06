@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { apiUrl } from '../api';
+import { authenticatedFetch } from '../api';
 import { ArrowLeft, CreditCard, Building2, Plus, ArrowUpRight, Copy, ScanLine, X, Lock, Unlock, Eye, EyeOff, RefreshCw, AlertTriangle, Send } from 'lucide-react';
 
 export default function Wallet({ onNavigate }) {
@@ -17,34 +17,49 @@ export default function Wallet({ onNavigate }) {
   const [paymentPhone, setPaymentPhone] = useState('');
   
   const [financials, setFinancials] = useState({ cardBalance: 0, debt: 0, isBlocked: false });
+  const [bankAccount, setBankAccount] = useState('');
+  const [transactions, setTransactions] = useState([]);
+  const [bankError, setBankError] = useState('');
   const userId = localStorage.getItem('userId');
 
   useEffect(() => {
     if (userId) {
-      fetch(apiUrl(`/api/wallet/balance/${userId}`))
+      authenticatedFetch(`/api/wallet/balance/${userId}`)
         .then(res => res.json())
         .then(data => setFinancials(data))
         .catch(err => console.error(err));
     }
+    authenticatedFetch('/api/wallet/transactions')
+      .then(res => res.ok ? res.json() : [])
+      .then(data => setTransactions(Array.isArray(data) ? data : []))
+      .catch(() => setTransactions([]));
+    authenticatedFetch('/api/auth/me')
+      .then(res => res.ok ? res.json() : null)
+      .then(user => { if (user) setBankAccount(user.bankAccount || ''); })
+      .catch(() => {});
   }, [userId]);
 
-  const [bankAccounts, setBankAccounts] = useState([
-    { id: 1, bank: 'Bancolombia Ahorros', number: '•••• 4321', isActive: true }
-  ]);
-
-  const handleAddBank = (e) => {
+  const handleAddBank = async (e) => {
     e.preventDefault();
     if (newBankAccount.trim() === '') return;
-    
-    const newAccount = {
-      id: Date.now(),
-      bank: newBankName,
-      number: newBankAccount,
-      isActive: false
-    };
-    setBankAccounts([...bankAccounts, newAccount]);
-    setShowAddBank(false);
-    setNewBankAccount('');
+    setBankError('');
+    try {
+      const res = await authenticatedFetch('/api/auth/me', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bankAccount: `${newBankName} ${newBankAccount.trim()}` })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBankError(data.error || 'No fue posible guardar la cuenta.');
+        return;
+      }
+      setBankAccount(data.bankAccount || '');
+      setShowAddBank(false);
+      setNewBankAccount('');
+    } catch {
+      setBankError('No fue posible conectar con el servidor.');
+    }
   };
 
   const handleCopyCard = () => {
@@ -57,7 +72,7 @@ export default function Wallet({ onNavigate }) {
   const handlePayDebt = async (e) => {
     if (e) e.preventDefault();
     try {
-      const res = await fetch(apiUrl('/api/wallet/pay-debt'), {
+      const res = await authenticatedFetch('/api/wallet/pay-debt', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId })
@@ -120,6 +135,7 @@ export default function Wallet({ onNavigate }) {
               
               <h3 style={{ marginBottom: '8px', color: paymentMethod === 'Nequi' ? '#E14896' : '#ED1C24' }}>Pago con {paymentMethod}</h3>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '24px' }}>Estás a punto de pagar tu deuda de <strong>${financials.debt.toLocaleString()} COP</strong> para reactivar tu cuenta.</p>
+              <p style={{ color: 'var(--warning)', fontSize: '0.85rem', marginBottom: '16px' }}>Los pagos están temporalmente deshabilitados hasta integrar un proveedor de pagos seguro.</p>
               
               <form onSubmit={handlePayDebt}>
                 <div className="input-group" style={{ marginBottom: '24px' }}>
@@ -134,8 +150,8 @@ export default function Wallet({ onNavigate }) {
                   />
                 </div>
                 
-                <button type="submit" className="btn-primary" style={{ width: '100%', background: paymentMethod === 'Nequi' ? '#E14896' : '#ED1C24', color: 'white', borderColor: 'transparent' }}>
-                  <Send size={18} style={{ marginRight: '8px' }} /> Procesar Pago
+                <button type="submit" disabled className="btn-primary" style={{ width: '100%', background: paymentMethod === 'Nequi' ? '#E14896' : '#ED1C24', color: 'white', borderColor: 'transparent', opacity: 0.6 }}>
+                  <Send size={18} style={{ marginRight: '8px' }} /> Pago no disponible
                 </button>
               </form>
             </div>
@@ -276,68 +292,60 @@ export default function Wallet({ onNavigate }) {
           Configura tus cuentas de Nequi, Daviplata, Bancolombia, etc. para recibir tus pagos.
         </p>
 
-        {bankAccounts.map((account) => (
-          <div key={account.id} className="glass-panel" style={{ padding: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{ background: 'var(--bg-surface-hover)', padding: '12px', borderRadius: '50%' }}>
-                <Building2 size={24} color="var(--text-main)" />
-              </div>
-              <div>
-                <h4 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '4px' }}>{account.bank}</h4>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{account.number}</p>
-              </div>
+        {bankAccount ? (
+          <div className="glass-panel" style={{ padding: '20px', display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
+            <div style={{ background: 'var(--bg-surface-hover)', padding: '12px', borderRadius: '50%' }}>
+              <Building2 size={24} color="var(--text-main)" />
             </div>
-            {account.isActive ? (
-              <span style={{ fontSize: '0.8rem', color: 'var(--success)', fontWeight: '600', background: 'rgba(16, 185, 129, 0.1)', padding: '4px 10px', borderRadius: '12px' }}>Principal</span>
-            ) : (
-              <button 
-                onClick={() => setBankAccounts(bankAccounts.map(b => ({ ...b, isActive: b.id === account.id })))}
-                style={{ background: 'none', border: '1px solid var(--border-color)', color: 'var(--text-muted)', borderRadius: '12px', padding: '4px 10px', fontSize: '0.8rem', cursor: 'pointer' }}
-              >
-                Elegir
-              </button>
-            )}
+            <div>
+              <h4 style={{ fontSize: '1rem', fontWeight: '600', marginBottom: '4px' }}>Cuenta registrada</h4>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{bankAccount}</p>
+            </div>
           </div>
-        ))}
+        ) : (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '12px' }}>
+            Aún no tienes una cuenta registrada para recibir tus pagos.
+          </p>
+        )}
 
-        <button onClick={() => setShowAddBank(true)} className="btn-secondary" style={{ width: '100%', color: 'var(--primary)', borderColor: 'var(--primary)', marginTop: '8px', marginBottom: '32px' }}>
-          <Plus size={20} /> Añadir otra cuenta bancaria
+        <button onClick={() => { setBankError(''); setShowAddBank(true); }} className="btn-secondary" style={{ width: '100%', color: 'var(--primary)', borderColor: 'var(--primary)', marginTop: '8px', marginBottom: '32px' }}>
+          <Plus size={20} /> {bankAccount ? 'Cambiar cuenta bancaria' : 'Añadir cuenta bancaria'}
         </button>
 
-        {/* Payroll Breakdown Section */}
+        {/* Movimientos reales del libro contable */}
         <h3 style={{ fontSize: '1.1rem', fontWeight: '600', marginBottom: '16px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          Resumen Quincenal (Prestaciones de Ley)
+          Movimientos recientes
         </h3>
-        
-        <div className="glass-panel" style={{ padding: '24px', marginBottom: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Ingresos Brutos (50 Domicilios)</span>
-            <span style={{ fontWeight: '600' }}>$750,000</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--danger)', fontSize: '0.9rem' }}>Aporte Plataforma (50 x $5,000)</span>
-            <span style={{ color: 'var(--danger)', fontWeight: '500' }}>-$250,000</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '12px' }}>
-            <span style={{ color: 'var(--danger)', fontSize: '0.9rem' }}>Salud (4%) y Pensión (4%)</span>
-            <span style={{ color: 'var(--danger)', fontWeight: '500' }}>-$40,000</span>
-          </div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-            <span style={{ color: 'var(--success)', fontSize: '0.9rem' }}>Provisión Prima y Prestaciones</span>
-            <span style={{ color: 'var(--success)', fontWeight: '500' }}>+$60,000</span>
-          </div>
-          
-          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontWeight: '700', fontSize: '1.1rem' }}>Total a Pagar (Neto)</span>
-            <span style={{ fontWeight: '700', fontSize: '1.4rem', color: 'var(--primary)' }}>$520,000</span>
-          </div>
-        </div>
+
+        {!transactions.length && (
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '24px' }}>
+            Todavía no tienes movimientos. Se registran al finalizar cada entrega.
+          </p>
+        )}
+
+        {transactions.map(transaction => {
+          const isEarning = transaction.type === 'EARNING';
+          return (
+            <div key={transaction.id} className="glass-panel" style={{ padding: '16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+              <div>
+                <p style={{ fontWeight: '600', fontSize: '0.95rem' }}>
+                  {isEarning ? 'Ganancia por entrega' : transaction.type === 'PLATFORM_FEE' ? 'Comisión de plataforma' : transaction.type}
+                </p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                  {new Date(transaction.createdAt).toLocaleString()}
+                </p>
+              </div>
+              <strong style={{ color: isEarning ? 'var(--success)' : 'var(--danger)' }}>
+                {transaction.amount > 0 ? '+' : ''}{Number(transaction.amount).toLocaleString()} COP
+              </strong>
+            </div>
+          );
+        })}
 
         <div style={{ flex: 1 }}></div>
 
-        {/* Withdraw Button */}
-        <button className="btn-primary" style={{ marginTop: 'auto' }}>
-          <ArrowUpRight size={20} /> Retirar Quincena ($520,000)
+        <button className="btn-primary" disabled style={{ marginTop: 'auto', opacity: 0.5, cursor: 'not-allowed' }}>
+          <ArrowUpRight size={20} /> Retiro disponible próximamente
         </button>
 
       </div>
@@ -432,6 +440,8 @@ export default function Wallet({ onNavigate }) {
                   onChange={(e) => setNewBankAccount(e.target.value)}
                 />
               </div>
+
+              {bankError && <p style={{ color: 'var(--danger)', marginBottom: '16px', fontSize: '0.85rem' }}>{bankError}</p>}
 
               <button type="submit" className="btn-primary" style={{ width: '100%' }}>
                 Vincular Cuenta

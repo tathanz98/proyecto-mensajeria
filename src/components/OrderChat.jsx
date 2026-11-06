@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Send, Trash2, X } from 'lucide-react';
-import { apiUrl } from '../api';
+import { authenticatedFetch } from '../api';
 
 export default function OrderChat({ orderId, onClose }) {
   const [messages, setMessages] = useState([]);
@@ -10,7 +10,7 @@ export default function OrderChat({ orderId, onClose }) {
 
   const loadMessages = useCallback(async () => {
     try {
-      const response = await fetch(apiUrl(`/api/orders/${orderId}/messages`));
+      const response = await authenticatedFetch(`/api/orders/${orderId}/messages`);
       const data = await response.json();
       if (response.ok) setMessages(data);
     } catch {
@@ -36,10 +36,10 @@ export default function OrderChat({ orderId, onClose }) {
     if (!draft.trim()) return;
     setError('');
     try {
-      const response = await fetch(apiUrl(`/api/orders/${orderId}/messages`), {
+      const response = await authenticatedFetch(`/api/orders/${orderId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: draft, senderRole: 'COURIER' })
+        body: JSON.stringify({ content: draft })
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error);
@@ -53,7 +53,7 @@ export default function OrderChat({ orderId, onClose }) {
   const clearChat = async () => {
     if (!window.confirm('¿Eliminar todos los mensajes de esta conversación?')) return;
     try {
-      const response = await fetch(apiUrl(`/api/orders/${orderId}/messages`), { method: 'DELETE' });
+      const response = await authenticatedFetch(`/api/orders/${orderId}/messages`, { method: 'DELETE' });
       if (!response.ok) throw new Error();
       setMessages([]);
     } catch {

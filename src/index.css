@@ -209,3 +209,8 @@ body {
   display: flex;
   flex-direction: column;
 }
+
+/* Mapa oscuro sobre mosaicos gratuitos de OpenStreetMap (sin API key). */
+.leaflet-dark-tiles .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(1.1) saturate(0.7);
+}

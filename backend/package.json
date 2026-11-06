@@ -5,7 +5,10 @@
   "main": "index.js",
   "scripts": {
     "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
     "build": "npx prisma generate && npx prisma db push",
+    "db:push": "npx prisma db push",
+    "postinstall": "prisma generate",
     "test": "jest"
   },
   "keywords": [],

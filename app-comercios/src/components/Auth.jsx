@@ -22,7 +22,7 @@ export default function Auth({ onLogin }) {
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'No fue posible acceder al comercio.');
-      onLogin({ id: data.userId || data.user?.id, name: data.user?.name || name });
+      onLogin({ id: data.userId || data.user?.id, name: data.user?.name || name, token: data.token });
     } catch (submitError) {
       setError(submitError.message || 'No fue posible conectar con el servidor.');
     } finally {
@@ -43,7 +43,7 @@ export default function Auth({ onLogin }) {
           {isLogin ? 'Acceso a Comercios' : 'Registra tu Negocio'}
         </h1>
         <p style={{ color: 'var(--text-muted)', marginBottom: '32px' }}>
-          {isLogin ? 'Gestiona tus pedidos y menú' : 'Únete a nuestra red en Colombia y más allá'}
+          {isLogin ? 'Gestiona tus pedidos y menú' : 'Únete a nuestra red en toda Colombia'}
         </p>
 
         <form onSubmit={handleSubmit} style={{ textAlign: 'left' }}>
@@ -63,12 +63,7 @@ export default function Auth({ onLogin }) {
                   <label>País</label>
                   <div style={{ position: 'relative' }}>
                     <MapPin size={20} style={{ position: 'absolute', left: '12px', top: '10px', color: 'var(--text-muted)' }} />
-                    <select className="input-field" style={{ paddingLeft: '40px' }}>
-                      <option>Colombia</option>
-                      <option>México</option>
-                      <option>Perú</option>
-                      <option>Argentina</option>
-                    </select>
+                    <input className="input-field" style={{ paddingLeft: '40px' }} value="Colombia" readOnly />
                   </div>
                 </div>
 

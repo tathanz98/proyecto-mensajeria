@@ -1,4 +1,4 @@
-import { Component, useState, useEffect } from 'react'
+import { Component, useState, useEffect, useRef } from 'react'
 import { io } from 'socket.io-client'
 import { BellRing, X, Check } from 'lucide-react'
 import Auth from './components/Auth'
@@ -7,7 +7,8 @@ import OrderTracking from './components/OrderTracking'
 import DeliveryProof from './components/DeliveryProof'
 import Schedule from './components/Schedule'
 import Wallet from './components/Wallet'
-import { apiUrl, realtimeApiUrl } from './api'
+import { authenticatedFetch, realtimeApiUrl } from './api'
+import { distanceKm } from './geo'
 
 class AppErrorBoundary extends Component {
   state = { error: null }
@@ -46,15 +47,218 @@ class AppErrorBoundary extends Component {
   }
 }
 
+function currentPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) {
+      reject(new Error('Este dispositivo no permite obtener tu ubicación.'));
+      return;
+    }
+    navigator.geolocation.getCurrentPosition(
+      position => resolve([position.coords.latitude, position.coords.longitude]),
+      error => reject(new Error(error.code === 1
+        ? 'Permite la ubicación del teléfono para conectarte y recibir pedidos.'
+        : 'No pudimos obtener tu ubicación. Activa el GPS e intenta de nuevo.')),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
+    );
+  });
+}
+
 function AppContent() {
   const [currentView, setCurrentView] = useState('auth')
+  const [profile, setProfile] = useState(null)
+  const [restoringSession, setRestoringSession] = useState(true)
   const [incomingOrder, setIncomingOrder] = useState(null)
   const [activeOrder, setActiveOrder] = useState(null)
   const [isAvailable, setIsAvailable] = useState(false)
+  const [availabilityStatus, setAvailabilityStatus] = useState('offline')
+  const [availabilityError, setAvailabilityError] = useState('')
+  const [courierLocation, setCourierLocation] = useState(null)
+  const [serviceRadiusKm, setServiceRadiusKm] = useState(6)
+
+  // El socket se conecta una sola vez, así que lee la zona actual desde refs.
+  const courierLocationRef = useRef(null)
+  const serviceRadiusRef = useRef(serviceRadiusKm)
 
   useEffect(() => {
-    const userId = localStorage.getItem('userId');
-    if (!userId || currentView === 'auth') return;
+    courierLocationRef.current = courierLocation
+  }, [courierLocation])
+
+  useEffect(() => {
+    serviceRadiusRef.current = serviceRadiusKm
+  }, [serviceRadiusKm])
+
+  const applyProfile = me => {
+    setProfile(me)
+    const online = Boolean(me.isOnline)
+    setIsAvailable(online)
+    setAvailabilityStatus(online ? 'online' : 'offline')
+    if (Number.isFinite(me.lastLat) && Number.isFinite(me.lastLng)) {
+      setCourierLocation([me.lastLat, me.lastLng])
+    }
+    if (Number.isFinite(me.serviceRadiusKm)) setServiceRadiusKm(me.serviceRadiusKm)
+  }
+
+  const saveAvailability = async ({ isOnline, location, radius }) => {
+    const body = { isOnline }
+    if (location) {
+      body.lat = location[0]
+      body.lng = location[1]
+    }
+    if (radius !== undefined) body.serviceRadiusKm = radius
+
+    const res = await authenticatedFetch('/api/auth/availability', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.error || 'No pudimos guardar tu disponibilidad.')
+    return data
+  }
+
+  // Pasar a ONLINE pide el GPS automáticamente: sin ubicación no hay zona de despacho.
+  const toggleAvailability = async () => {
+    if (availabilityStatus === 'locating') return
+
+    if (isAvailable) {
+      setIsAvailable(false)
+      setAvailabilityStatus('offline')
+      setAvailabilityError('')
+      setIncomingOrder(null)
+      try {
+        await saveAvailability({ isOnline: false })
+      } catch {
+        // Se reintenta cuando vuelva la conexión.
+      }
+      return
+    }
+
+    setAvailabilityStatus('locating')
+    setAvailabilityError('')
+    try {
+      const location = await currentPosition()
+      const saved = await saveAvailability({ isOnline: true, location })
+      setCourierLocation([saved.lastLat, saved.lastLng])
+      setIsAvailable(true)
+      setAvailabilityStatus('online')
+    } catch (error) {
+      setAvailabilityStatus('offline')
+      setAvailabilityError(error.message)
+    }
+  }
+
+  const changeServiceRadius = async radius => {
+    const previous = serviceRadiusKm
+    setServiceRadiusKm(radius)
+    try {
+      await saveAvailability({
+        isOnline: isAvailable,
+        location: isAvailable ? courierLocation : undefined,
+        radius
+      })
+    } catch {
+      setServiceRadiusKm(previous)
+      setAvailabilityError('No pudimos actualizar tu zona de trabajo.')
+    }
+  }
+
+  // Recupera la sesión y el pedido en curso al recargar la app.
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setRestoringSession(false);
+      return;
+    }
+
+    (async () => {
+      try {
+        const meRes = await authenticatedFetch('/api/auth/me');
+        if (!meRes.ok) throw new Error('Sesión no válida');
+        const me = await meRes.json();
+        if (me.role !== 'COURIER') throw new Error('Esta aplicación es para domiciliarios');
+
+        const activeRes = await authenticatedFetch('/api/orders/mine?status=ACTIVE');
+        const active = activeRes.ok
+          ? (await activeRes.json()).find(order => order.status === 'ACCEPTED' || order.status === 'PICKED_UP')
+          : null;
+
+        setActiveOrder(active || null);
+        setCurrentView('dashboard');
+        applyProfile(me);
+      } catch {
+        localStorage.removeItem('token');
+        localStorage.removeItem('userId');
+      } finally {
+        setRestoringSession(false);
+      }
+    })();
+  }, []);
+
+  const handleLogin = async () => {
+    try {
+      const res = await authenticatedFetch('/api/auth/me');
+      if (!res.ok) return;
+      applyProfile(await res.json());
+
+      const activeRes = await authenticatedFetch('/api/orders/mine?status=ACTIVE');
+      if (activeRes.ok) {
+        const orders = await activeRes.json();
+        setActiveOrder(orders.find(order => order.status === 'ACCEPTED' || order.status === 'PICKED_UP') || null);
+      }
+    } catch {
+      // El panel sigue usable aunque el perfil tarde en cargar.
+    }
+    setCurrentView('dashboard');
+  };
+
+  const handleLogout = () => {
+    if (isAvailable) {
+      authenticatedFetch('/api/auth/availability', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isOnline: false })
+      }).catch(() => {});
+    }
+    localStorage.removeItem('token');
+    localStorage.removeItem('userId');
+    setProfile(null);
+    setIncomingOrder(null);
+    setActiveOrder(null);
+    setIsAvailable(false);
+    setAvailabilityStatus('offline');
+    setAvailabilityError('');
+    setCurrentView('auth');
+  };
+
+  // Mientras está ONLINE se guarda la ubicación real cada 30 s o al moverse 300 m.
+  useEffect(() => {
+    if (!isAvailable || !navigator.geolocation) return;
+    let lastSentAt = 0;
+    let lastSent = null;
+
+    const watchId = navigator.geolocation.watchPosition(
+      position => {
+        const location = [position.coords.latitude, position.coords.longitude];
+        setCourierLocation(location);
+
+        const now = Date.now();
+        const moved = !lastSent || (distanceKm(lastSent, location) ?? 0) >= 0.3;
+        if (now - lastSentAt < 30000 && !moved) return;
+
+        lastSentAt = now;
+        lastSent = location;
+        saveAvailability({ isOnline: true, location }).catch(() => {});
+      },
+      () => {},
+      { enableHighAccuracy: true, maximumAge: 15000, timeout: 20000 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [isAvailable]);
+
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    if (!token || currentView === 'auth') return;
 
     // Sin una URL configurada no iniciamos Socket.IO: hacerlo con un valor
     // indefinido puede provocar un fallo al entrar al panel, especialmente en Capacitor.
@@ -63,10 +267,22 @@ function AppContent() {
       return;
     }
 
-    const socket = io(realtimeApiUrl);
+    const socket = io(realtimeApiUrl, { auth: { token } });
+    if (activeOrder?.id) socket.emit('join_order', activeOrder.id);
     
     socket.on('new_order', (order) => {
       if (!isAvailable) return;
+
+      // Solo se avisa de pedidos que salen dentro de la zona de trabajo elegida.
+      const location = courierLocationRef.current;
+      const distance = location
+        && Number.isFinite(order.pickupLat) && Number.isFinite(order.pickupLng)
+        ? distanceKm(location, [order.pickupLat, order.pickupLng])
+        : null;
+      if (distance !== null && distance > serviceRadiusRef.current) return;
+
+      const payload = distance === null ? order : { ...order, distanceKm: Number(distance.toFixed(1)) };
+
       // Play a quick alert sound natively (if browser allows)
       if (window.navigator && window.navigator.vibrate) {
         window.navigator.vibrate([200, 100, 200]);
@@ -75,51 +291,60 @@ function AppContent() {
         Notification.requestPermission();
       }
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Nuevo pedido disponible', { body: `Ganancia estimada: $${(order.price - 5000).toLocaleString()} COP` });
+        new Notification('Nuevo pedido disponible', { body: `Ganancia estimada: $${(payload.price - 5000).toLocaleString()} COP` });
       }
-      setIncomingOrder(order);
+      setIncomingOrder(payload);
+    });
+
+    socket.on('order_updated', (order) => {
+      setActiveOrder(current => {
+        if (current?.id !== order.id) return current;
+        return order.status === 'DELIVERED' ? null : { ...current, ...order };
+      });
     });
 
     socket.on('order_message', (message) => {
-      if (message.orderId !== activeOrder?.id || message.senderRole !== 'CUSTOMER') return;
+      if (message.orderId !== activeOrder?.id || message.senderRole === 'COURIER') return;
       if (window.navigator?.vibrate) window.navigator.vibrate([120, 80, 120]);
       if ('Notification' in window && Notification.permission === 'granted') {
-        new Notification('Mensaje del cliente', { body: message.content });
+        new Notification('Nuevo mensaje del cliente', { body: message.content });
       }
     });
 
     return () => socket.disconnect();
   }, [currentView, isAvailable, activeOrder]);
 
-  const handleAcceptOrder = async () => {
+  const acceptOrder = async (order) => {
+    if (!order?.id) return false;
     try {
-      const userId = localStorage.getItem('userId');
-      const res = await fetch(apiUrl(`/api/orders/${incomingOrder.id}/accept`), {
+      const res = await authenticatedFetch(`/api/orders/${order.id}/accept`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ courierId: userId })
+        headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
-      if (res.ok) {
-        setIncomingOrder(null);
-        setActiveOrder(data.order);
-        setCurrentView('tracking');
-      } else {
+      if (!res.ok) {
         alert(data.error || 'No se pudo aceptar el pedido');
         setIncomingOrder(null);
+        return false;
       }
+      setIncomingOrder(null);
+      setActiveOrder(data.order);
+      setCurrentView('tracking');
+      return true;
     } catch {
       alert('Error de red');
+      return false;
     }
   };
+
+  const handleAcceptOrder = () => acceptOrder(incomingOrder);
 
   const handleRejectOrder = async () => {
     if (!incomingOrder) return;
     try {
-      const res = await fetch(apiUrl(`/api/orders/${incomingOrder.id}/reject`), {
+      const res = await authenticatedFetch(`/api/orders/${incomingOrder.id}/reject`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ courierId: localStorage.getItem('userId') })
+        headers: { 'Content-Type': 'application/json' }
       });
       const data = await res.json();
       if (!res.ok) alert(data.error || 'No fue posible rechazar el pedido.');
@@ -134,10 +359,33 @@ function AppContent() {
     setCurrentView(view)
   }
 
+  if (restoringSession) {
+    return (
+      <div className="view-container" style={{ justifyContent: 'center', alignItems: 'center', minHeight: '100vh' }}>
+        <p style={{ color: 'var(--text-muted)' }}>Cargando tu sesión...</p>
+      </div>
+    )
+  }
+
   return (
     <>
-      {currentView === 'auth' && <Auth onLogin={() => navigateTo('dashboard')} />}
-      {currentView === 'dashboard' && <Dashboard onNavigate={navigateTo} isAvailable={isAvailable} onToggleAvailability={() => setIsAvailable(value => !value)} activeOrder={activeOrder} onLogout={() => { localStorage.removeItem('token'); localStorage.removeItem('userId'); setIncomingOrder(null); setActiveOrder(null); setIsAvailable(false); navigateTo('auth'); }} />}
+      {currentView === 'auth' && <Auth onLogin={handleLogin} />}
+      {currentView === 'dashboard' && (
+        <Dashboard
+          profile={profile}
+          onNavigate={navigateTo}
+          isAvailable={isAvailable}
+          availabilityStatus={availabilityStatus}
+          availabilityError={availabilityError}
+          onToggleAvailability={toggleAvailability}
+          courierLocation={courierLocation}
+          serviceRadiusKm={serviceRadiusKm}
+          onChangeServiceRadius={changeServiceRadius}
+          activeOrder={activeOrder}
+          onAcceptOrder={acceptOrder}
+          onLogout={handleLogout}
+        />
+      )}
       {currentView === 'tracking' && <OrderTracking onNavigate={navigateTo} order={activeOrder} />}
       {currentView === 'proof' && <DeliveryProof onNavigate={navigateTo} order={activeOrder} onOrderCompleted={() => setActiveOrder(null)} />}
       {currentView === 'schedule' && <Schedule onNavigate={navigateTo} />}
@@ -153,11 +401,19 @@ function AppContent() {
             </div>
             
             <h1 style={{ fontSize: '1.8rem', color: 'var(--text-main)', marginBottom: '8px' }}>¡NUEVO PEDIDO!</h1>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '4px' }}>
+              Pedido #{incomingOrder.code || incomingOrder.id.slice(0, 8)}
+              {incomingOrder.distanceKm != null && ` · a ${incomingOrder.distanceKm} km de ti`}
+            </p>
             <p style={{ color: 'var(--primary)', fontSize: '1.2rem', fontWeight: '700', marginBottom: '24px' }}>Ganancia: ${(incomingOrder.price - 5000).toLocaleString()} COP</p>
             
             <div style={{ background: 'var(--bg-dark)', padding: '16px', borderRadius: '12px', marginBottom: '32px', textAlign: 'left' }}>
-              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '4px' }}>Restaurante</p>
-              <p style={{ fontWeight: '600', fontSize: '1.1rem' }}>Restaurante ID: {incomingOrder.businessId.slice(0,8)}</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '4px' }}>Cliente que lo pidió</p>
+              <p style={{ fontWeight: '600', fontSize: '1rem', marginBottom: '12px' }}>{incomingOrder.customerName || 'Cliente'}</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '4px' }}>Recoger en</p>
+              <p style={{ fontWeight: '600', fontSize: '1rem', marginBottom: '12px' }}>{incomingOrder.businessName || 'Comercio'}</p>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', marginBottom: '4px' }}>Dirección de recogida</p>
+              <p style={{ fontWeight: '600', fontSize: '1rem' }}>{incomingOrder.pickupAddress || 'Sin dirección registrada'}</p>
             </div>
 
             <div style={{ display: 'flex', gap: '16px' }}>

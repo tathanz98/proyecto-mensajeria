@@ -7,7 +7,7 @@
     },
     "backend": {
       "root": "backend/",
-      "entrypoint": "src/server.js"
+      "entrypoint": "api/index.js"
     }
   },
   "rewrites": [

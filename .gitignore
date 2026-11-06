@@ -10,4 +10,6 @@ app-comercios/dist/
 backend/node_modules/
 backend/dev.db
 .vercel
-.env*
+.env
+.env.*
+!**/.env.example

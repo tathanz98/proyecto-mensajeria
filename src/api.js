@@ -8,3 +8,10 @@ export const apiUrl = (path) => {
 };
 
 export const realtimeApiUrl = configuredApiUrl || null;
+
+export const authenticatedFetch = (path, options = {}) => {
+  const headers = new Headers(options.headers || {});
+  const token = localStorage.getItem('token');
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  return fetch(apiUrl(path), { ...options, headers });
+};

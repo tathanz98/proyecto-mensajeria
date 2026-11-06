@@ -25,31 +25,108 @@ model User {
   cardBalance    Float     @default(0)
   debt           Float     @default(0)
   isBlocked      Boolean   @default(false)
-  
+
+  // Capacidad diaria de despachos configurada por el comercio (null = sin límite).
+  dailyOrderLimit Int?
+
+  // Disponibilidad y zona de trabajo del domiciliario.
+  isOnline        Boolean   @default(false)
+  lastLat         Float?
+  lastLng         Float?
+  lastLocationAt  DateTime?
+  serviceRadiusKm Int       @default(6)
+
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
 
   ordersAsCourier Order[]  @relation("CourierOrders")
   ordersAsBusiness Order[] @relation("BusinessOrders")
+  products        Product[] @relation("BusinessProducts")
   ledger          Ledger[]
+}
+
+model Product {
+  id             String    @id @default(uuid())
+  kind           String    @default("PRODUCT") // 'PRODUCT' o 'COMBO'
+  name           String
+  description    String?
+  category       String?
+  price          Float
+  imageData      String?
+  isAvailable    Boolean   @default(true)
+
+  // Oferta programada: precio especial, vigencia y días de aplicación.
+  offerPrice     Float?
+  offerTitle     String?
+  offerStart     DateTime?
+  offerEnd       DateTime?
+  offerWeekdays  String?   // "0,6" donde 0=domingo ... 6=sábado
+  offerOnHolidays Boolean  @default(false)
+
+  businessId     String
+  business       User      @relation("BusinessProducts", fields: [businessId], references: [id], onDelete: Cascade)
+
+  comboItems     ComboItem[] @relation("ComboParent")
+  partOfCombos   ComboItem[] @relation("ComboPart")
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([businessId])
+}
+
+model ComboItem {
+  id        String  @id @default(uuid())
+  quantity  Int     @default(1)
+
+  comboId   String
+  combo     Product @relation("ComboParent", fields: [comboId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation("ComboPart", fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([comboId, productId])
 }
 
 model Order {
   id             String    @id @default(uuid())
+  code           String?   // Código legible que comparten comercio y domiciliario.
+  qrToken        String?   // Contenido del QR asignado al pedido.
   status         String    // 'PENDING', 'ACCEPTED', 'PICKED_UP', 'DELIVERED'
   pickupPin      String
   dropoffPin     String
   price          Float
-  
+
+  // Verificación del domiciliario antes de recoger el pedido.
+  verificationStatus String  @default("PENDING") // 'PENDING' o 'VERIFIED'
+  orderPhoto     String?
+  invoicePhoto   String?
+  qrPhoto        String?
+  verifiedAt     DateTime?
+
+  customerName   String?
+  customerPhone  String?
+  pickupAddress  String?
+  dropoffAddress String?
+  pickupLat      Float?
+  pickupLng      Float?
+  dropoffLat     Float?
+  dropoffLng     Float?
+  notes          String?
+
   businessId     String
   business       User      @relation("BusinessOrders", fields: [businessId], references: [id])
-  
+
   courierId      String?
   courier        User?     @relation("CourierOrders", fields: [courierId], references: [id])
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
   messages       Message[]
+
+  @@index([status])
+  @@index([businessId])
+  @@index([courierId])
 }
 
 model Message {

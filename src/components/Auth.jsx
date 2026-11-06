@@ -408,7 +408,11 @@ export default function Auth({ onLogin }) {
       const data = await res.json();
       if (!res.ok) { setError(data.error || 'Error en la autenticación'); return; }
 
-      localStorage.setItem('token', data.token || 'demo-token');
+      if (!data.token) {
+        setError('El servidor no pudo iniciar una sesión segura. Intenta de nuevo más tarde.');
+        return;
+      }
+      localStorage.setItem('token', data.token);
       localStorage.setItem('userId', data.userId || data.user?.id);
 
       if (isLogin) {
@@ -432,7 +436,7 @@ export default function Auth({ onLogin }) {
           body: JSON.stringify({ email })
         });
         const data = await res.json();
-        if (res.ok) { setSuccessMsg(`Código enviado. (Demo - Código: ${data.simulatedCode})`); setResetStep(2); }
+        if (res.ok) { setSuccessMsg(data.message || 'Si la cuenta existe, recibirás instrucciones para recuperar el acceso.'); setResetStep(2); }
         else setError(data.error);
       } else if (resetStep === 2) {
         const res = await fetch(apiUrl('/api/auth/verify-code'), {
@@ -464,13 +468,13 @@ export default function Auth({ onLogin }) {
     setError(null);
     try {
       const formData = new FormData();
-      formData.append('userId', localStorage.getItem('userId'));
       formData.append('selfie', selfieFile);
       formData.append('idFront', idFrontFile);
       formData.append('idBack', idBackFile);
 
       const res = await fetch(apiUrl('/api/auth/upload-docs'), {
         method: 'POST',
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || ''}` },
         body: formData,
       });
       if (res.ok) { setRegistrationStep(3); }
